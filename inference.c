@@ -179,18 +179,6 @@ void fc3_forward() {
     }
 }
 
-int predict_label() {
-    int max_index = 0;
-    float max_val = fc3_output[0];
-    for (int i = 1; i < FC3_SIZE; i++) {
-        if (fc3_output[i] > max_val) {
-            max_val = fc3_output[i];
-            max_index = i;
-        }
-    }
-    return max_index;
-}
-
 void softmax(float* input, float* output, int length) {
     float max_val = input[0];
     for (int i = 1; i < length; ++i) {
@@ -272,6 +260,94 @@ void load_weights(const char *filename) {
     printf("Weights loaded successfully!\n");
 }
 
+void save_conv1_output(const char* filename) {
+    FILE* f = fopen(filename, "w");
+    for (int f_idx = 0; f_idx < CONV1_FILTERS; f_idx++) {
+        for (int i = 0; i < 24; i++) {
+            for (int j = 0; j < 24; j++) {
+                fprintf(f, "%.6f ", conv1_output[f_idx][i][j]);
+            }
+            fprintf(f, "\n");
+        }
+        fprintf(f, "\n");
+    }
+    fclose(f);
+}
+
+void save_pool1_output(const char* filename) {
+    FILE* f = fopen(filename, "w");
+    for (int f_idx = 0; f_idx < CONV1_FILTERS; f_idx++) {
+        for (int i = 0; i < 12; i++) {
+            for (int j = 0; j < 12; j++) {
+                fprintf(f, "%.6f ", pool1_output[f_idx][i][j]);
+            }
+            fprintf(f, "\n");
+        }
+        fprintf(f, "\n");
+    }
+    fclose(f);
+}
+
+void save_conv2_output(const char* filename) {
+    FILE* f = fopen(filename, "w");
+    for (int f_idx = 0; f_idx < CONV2_FILTERS; f_idx++) {
+        for (int i = 0; i < 8; i++) {
+            for (int j = 0; j < 8; j++) {
+                fprintf(f, "%.6f ", conv2_output[f_idx][i][j]);
+            }
+            fprintf(f, "\n");
+        }
+        fprintf(f, "\n");
+    }
+    fclose(f);
+}
+
+void save_pool2_output(const char* filename) {
+    FILE* f = fopen(filename, "w");
+    for (int f_idx = 0; f_idx < CONV2_FILTERS; f_idx++) {
+        for (int i = 0; i < 4; i++) {
+            for (int j = 0; j < 4; j++) {
+                fprintf(f, "%.6f ", pool2_output[f_idx][i][j]);
+            }
+            fprintf(f, "\n");
+        }
+        fprintf(f, "\n");
+    }
+    fclose(f);
+}
+
+void save_flattened_input(const char* filename) {
+    FILE* f = fopen(filename, "w");
+    for (int i = 0; i < 256; i++) {
+        fprintf(f, "%.6f\n", fc_input[i]);
+    }
+    fclose(f);
+}
+
+void save_fc1_output(const char* filename) {
+    FILE* f = fopen(filename, "w");
+    for (int i = 0; i < FC1_SIZE; i++) {
+        fprintf(f, "%.6f\n", fc1_output[i]);
+    }
+    fclose(f);
+}
+
+void save_fc2_output(const char* filename) {
+    FILE* f = fopen(filename, "w");
+    for (int i = 0; i < FC2_SIZE; i++) {
+        fprintf(f, "%.6f\n", fc2_output[i]);
+    }
+    fclose(f);
+}
+
+void save_fc3_output(const char* filename) {
+    FILE* f = fopen(filename, "w");
+    for (int i = 0; i < FC3_SIZE; i++) {
+        fprintf(f, "%.6f\n", fc3_output[i]);
+    }
+    fclose(f);
+}
+
 // Load and normalize a grayscale MNIST-style image
 void load_input_image(const char* filename) {
     int width, height, channels;
@@ -298,6 +374,147 @@ void load_input_image(const char* filename) {
     printf("Input image loaded and normalized successfully.\n");
 }
 
+
+
+void save_input_image_flat(const char* filename) {
+    FILE* f = fopen(filename, "w");
+    for (int i = 0; i < IMG_SIZE; i++) {
+        for (int j = 0; j < IMG_SIZE; j++) {
+            fprintf(f, "%.6f\n", input_image[i][j]);
+        }
+    }
+    fclose(f);
+}
+
+void save_conv1_weights_flat(const char* filename) {
+    FILE* f = fopen(filename, "w");
+    for (int f_idx = 0; f_idx < CONV1_FILTERS; f_idx++) {
+        for (int i = 0; i < CONV1_KERNEL_SIZE; i++) {
+            for (int j = 0; j < CONV1_KERNEL_SIZE; j++) {
+                fprintf(f, "%.6f\n", conv1_weights[f_idx][i][j]);
+            }
+        }
+    }
+    fclose(f);
+}
+
+void save_conv1_biases(const char* filename) {
+    FILE* f = fopen(filename, "w");
+    for (int i = 0; i < CONV1_FILTERS; i++) {
+        fprintf(f, "%.6f\n", conv1_biases[i]);
+    }
+    fclose(f);
+}
+
+void save_conv2_weights_flat(const char* filename) {
+    FILE* f = fopen(filename, "w");
+    for (int f_idx = 0; f_idx < CONV2_FILTERS; f_idx++) {
+        for (int c = 0; c < CONV1_FILTERS; c++) {  // 6 input channels
+            for (int i = 0; i < CONV2_KERNEL_SIZE; i++) {
+                for (int j = 0; j < CONV2_KERNEL_SIZE; j++) {
+                    fprintf(f, "%.6f\n", conv2_weights[f_idx][c][i][j]);
+                }
+            }
+        }
+    }
+    fclose(f);
+}
+
+void save_conv2_biases(const char* filename) {
+    FILE* f = fopen(filename, "w");
+    for (int i = 0; i < CONV2_FILTERS; i++) {
+        fprintf(f, "%.6f\n", conv2_biases[i]);
+    }
+    fclose(f);
+}
+
+void save_fc1_weights_flat(const char* filename) {
+    FILE* f = fopen(filename, "w");
+    if (!f) {
+        printf("Error: Could not open %s for writing\n", filename);
+        return;
+    }
+
+    for (int i = 0; i < 120; ++i) {
+        for (int j = 0; j < 256; ++j) {
+            fprintf(f, "%.6f\n", fc1_weights[i][j]);
+        }
+    }
+
+    fclose(f);
+}
+
+void save_fc1_biases(const char* filename) {
+    FILE* f = fopen(filename, "w");
+    if (!f) {
+        printf("Error: Could not open %s for writing\n", filename);
+        return;
+    }
+
+    for (int i = 0; i < 120; ++i) {
+        fprintf(f, "%.6f\n", fc1_biases[i]);
+    }
+
+    fclose(f);
+}
+
+void save_fc2_weights_flat(const char* filename) {
+    FILE* f = fopen(filename, "w");
+    if(!f) {
+    	printf("Error: Could not open %s for writing\n", filename);
+	return;
+    }
+    for (int i = 0; i < 84; i++) {
+	for (int j = 0; j < 120; j++) {
+	    fprintf(f, "%.6f\n", fc2_weights[i][j]);
+	}
+    }
+
+    fclose(f);
+}
+
+
+void save_fc2_biases(const char* filename) {
+    FILE* f = fopen(filename, "w");
+    if(!f) {
+    	printf("Error: Could not open %s for writing\n", filename);
+	return;
+    }
+    for (int i = 0; i < 84; i++) {
+	    fprintf(f, "%.6f\n", fc2_biases[i]);
+    }
+    fclose(f);
+}
+
+void save_fc3_weights_flat(const char* filename) {
+    FILE* f = fopen(filename, "w");
+    if(!f) {
+    	printf("Error: Could not open %s for writing\n", filename);
+	return;
+    }
+    for (int i = 0; i < 10; i++) {
+	for (int j = 0; j < 84; j++) {
+	    fprintf(f, "%.6f\n", fc3_weights[i][j]);
+	}
+    }
+
+    fclose(f);
+}
+
+
+void save_fc3_biases(const char* filename) {
+    FILE* f = fopen(filename, "w");
+    if(!f) {
+    	printf("Error: Could not open %s for writing\n", filename);
+	return;
+    }
+    for (int i = 0; i < 10; i++) {
+	    fprintf(f, "%.6f\n", fc3_biases[i]);
+    }
+    fclose(f);
+}
+
+
 int main(int argc, char** argv) {
     if (argc != 2) {
         printf("Usage: %s <28x28_grayscale_image.png>\n", argv[0]);
@@ -307,10 +524,23 @@ int main(int argc, char** argv) {
     load_weights("weights.txt");
     load_input_image(argv[1]);
 
-    conv1_forward();
-    pool1_forward();
-    conv2_forward();
-    pool2_forward();
+
+    save_input_image_flat("input_image.txt");
+    save_conv1_weights_flat("conv1_weights.txt");
+    save_conv1_biases("conv1_biases.txt");
+
+    save_conv2_weights_flat("conv2_weights.txt");
+    save_conv2_biases("conv2_biases.txt");
+
+    save_fc1_weights_flat("fc1_weights.txt");
+    save_fc1_biases("fc1_biases.txt");
+
+    save_fc2_weights_flat("fc2_weights.txt");
+    save_fc2_biases("fc2_biases.txt");
+
+    save_fc3_weights_flat("fc3_weights.txt");
+    save_fc3_biases("fc3_biases.txt");
+    
     conv1_forward();
     pool1_forward();
     conv2_forward();
@@ -320,11 +550,29 @@ int main(int argc, char** argv) {
     fc2_forward();
     fc3_forward();
 
-    int prediction = predict_label();
-    printf("Predicted Digit: %d\n", prediction);
-   
+    save_conv1_output("conv1_output.txt");
+    save_pool1_output("pool1_output.txt");
+    save_conv2_output("conv2_output.txt");
+    save_pool2_output("pool2_output.txt");
+    save_flattened_input("flattened_input.txt");
+    save_fc1_output("fc1_output.txt");
+    save_fc2_output("fc2_output.txt");
+    save_fc3_output("fc3_output.txt");
+
     float probabilities[10];
     softmax(fc3_output, probabilities, 10);
+
+    int prediction = 0;
+    float max_probability = probabilities[0];
+    for (int i = 0; i < 10; i++) {
+    	if(probabilities[i] > max_probability)
+	{
+		prediction = i;
+		max_probability = probabilities[i];
+	}
+    }
+    printf("Predicted Digit: %d\n", prediction);
+   
   
    for (int i = 0; i < 10; ++i) {
         printf("Class %d: %.4f\n", i, probabilities[i]);
