@@ -229,47 +229,60 @@ __global__ void conv1_shared_kernel(
     const float* biases,      // [6]
     float* output             // [6 x 24 x 24]
 ) {
-    const int tx = threadIdx.x;
-    const int ty = threadIdx.y;
-    const int row = blockIdx.y * blockDim.y + ty;
-    const int col = blockIdx.x * blockDim.x + tx;
+    // Output coordinates
+    const int row = blockIdx.y * blockDim.y + threadIdx.y;
+    const int col = blockIdx.x * blockDim.x + threadIdx.x;
+    const int filter_id = blockIdx.z;
 
-    const int filter_id = blockIdx.z;  // 0–5
+    if (row >= 24 || col >= 24) return;
 
-    // Shared memory tile: enough for 24x24 output + 4 halo (5x5 filter needs 4 extra rows/cols)
-    __shared__ float tile[28 + 4][28 + 4];  // 32x32
+    // Shared memory tile size: enough for the block and its 5x5 filter footprint (halo)
+    // Tile = (blockDim.y + 4) x (blockDim.x + 4)
+    __shared__ float tile[32][32];  // assumes blockDim.x, y <= 28
 
-    // Load tile from input into shared memory (with zero-padding)
-    int shared_row = ty;
-    int shared_col = tx;
-    int input_row = blockIdx.y * blockDim.y + shared_row;
-    int input_col = blockIdx.x * blockDim.x + shared_col;
+    // Global index to load into shared memory
+    int input_row = row + threadIdx.y;
+    int input_col = col + threadIdx.x;
 
-    if (input_row < 28 && input_col < 28)
-        tile[shared_row][shared_col] = input[input_row * 28 + input_col];
-    else
-        tile[shared_row][shared_col] = 0.0f;
+    // Load into shared memory with boundary check
+    if (input_row < 28 && input_col < 28) {
+        tile[threadIdx.y][threadIdx.x] = input[input_row * 28 + input_col];
+    } else {
+        tile[threadIdx.y][threadIdx.x] = 0.0f;
+    }
+
+    // Also need halo region for filter (handle right & bottom edge if needed)
+    if (threadIdx.y < 5 && (row + 5) < 28) {
+        tile[threadIdx.y + blockDim.y][threadIdx.x] =
+            input[(input_row + blockDim.y) * 28 + input_col];
+    }
+
+    if (threadIdx.x < 5 && (col + 5) < 28) {
+        tile[threadIdx.y][threadIdx.x + blockDim.x] =
+            input[input_row * 28 + input_col + blockDim.x];
+    }
+
+    // Lower-right corner (to fully load halo)
+    if (threadIdx.x < 5 && threadIdx.y < 5 && (col + 5) < 28 && (row + 5) < 28) {
+        tile[threadIdx.y + blockDim.y][threadIdx.x + blockDim.x] =
+            input[(input_row + blockDim.y) * 28 + input_col + blockDim.x];
+    }
 
     __syncthreads();
 
-    // Only compute output if we're in valid 24x24 output space
-    if (row < 24 && col < 24) {
-        float sum = 0.0f;
-        for (int i = 0; i < 5; i++) {
-            for (int j = 0; j < 5; j++) {
-                int s_row = ty + i;
-                int s_col = tx + j;
-                if (s_row < 32 && s_col < 32) {
-                    int filter_idx = filter_id * 25 + i * 5 + j;
-                    sum += tile[s_row][s_col] * filters[filter_idx];
-                }
-            }
+    // Convolve
+    float sum = 0.0f;
+    for (int i = 0; i < 5; i++) {
+        for (int j = 0; j < 5; j++) {
+            sum += tile[threadIdx.y + i][threadIdx.x + j] *
+                   filters[filter_id * 25 + i * 5 + j];
         }
-
-        int out_idx = filter_id * 24 * 24 + row * 24 + col;
-        output[out_idx] = fmaxf(0.0f, sum + biases[filter_id]); // ReLU
     }
+
+    int out_idx = filter_id * 24 * 24 + row * 24 + col;
+    output[out_idx] = fmaxf(0.0f, sum + biases[filter_id]); // ReLU
 }
+
 
 
 __global__ void pool1_shared_kernel(
@@ -528,10 +541,10 @@ int main() {
     h_output = (float*)malloc(NUM_FILTERS * OUTPUT_SIZE * OUTPUT_SIZE * sizeof(float));
 
     // Read from files with checks
-    printf("[INFO] Reading conv1 input and weights...\n");
-    read_input("OutputFiles/input_image.txt", h_input);
-    read_filters("OutputFiles/conv1_weights.txt", h_filters);
-    read_biases("OutputFiles/conv1_biases.txt", h_biases);
+    
+    read_input("input_image.txt", h_input);
+    read_filters("conv1_weights.txt", h_filters);
+    read_biases("conv1_biases.txt", h_biases);
 
 
     // Allocate device memory
@@ -549,13 +562,13 @@ int main() {
     cudaCheckError();
 
     // Launch conv1
-    printf("[INFO] Launching conv1_shared_kernel...\n");
+    
     dim3 blockDim(12, 12);  // safer with shared memory
     dim3 gridDim((OUTPUT_SIZE + 11) / 12, (OUTPUT_SIZE + 11) / 12, NUM_FILTERS);
     conv1_shared_kernel<<<gridDim, blockDim>>>(d_input, d_filters, d_biases, d_output);
     cudaDeviceSynchronize();
     cudaCheckError();
-    printf("[INFO] conv1 done.\n");
+    
 
     // Pool1
     float *d_pool1_output;
@@ -565,19 +578,19 @@ int main() {
     dim3 blockDimPool1(12, 12);
     dim3 gridDimPool1((12 + 11) / 12, (12 + 11) / 12, 6);
 
-    printf("[INFO] Launching pool1_kernel...\n");
+    
     pool1_shared_kernel<<<gridDimPool1, blockDimPool1>>>(d_output, d_pool1_output);
     cudaDeviceSynchronize();
     cudaCheckError();
-    printf("[INFO] pool1 done.\n");
+    
 
     // Conv2
-    printf("[INFO] Reading conv2 weights...\n");
+    
     float* h_conv2_filters = (float*)malloc(2400 * sizeof(float)); // 16x6x25
     float* h_conv2_biases = (float*)malloc(16 * sizeof(float));
     float* h_conv2_output = (float*)malloc(16 * 8 * 8 * sizeof(float));
-    read_conv2_filters("OutputFiles/conv2_weights.txt", h_conv2_filters);
-    read_conv2_biases("OutputFiles/conv2_biases.txt", h_conv2_biases);
+    read_conv2_filters("conv2_weights.txt", h_conv2_filters);
+    read_conv2_biases("conv2_biases.txt", h_conv2_biases);
 
     float *d_conv2_filters, *d_conv2_biases, *d_conv2_output;
     cudaMalloc(&d_conv2_filters, 2400 * sizeof(float));
@@ -592,11 +605,11 @@ int main() {
     dim3 blockDimConv2(8, 8);
     dim3 gridDimConv2((8 + 7) / 8, (8 + 7) / 8, 16);
 
-    printf("[INFO] Launching conv2_kernel...\n");
+    
     conv2_shared_kernel<<<gridDimConv2, blockDimConv2>>>(d_pool1_output, d_conv2_filters, d_conv2_biases, d_conv2_output);
     cudaDeviceSynchronize();
     cudaCheckError();
-    printf("[INFO] conv2 done.\n");
+    
 
     // Pool2
     float* h_pool2_output = (float*)malloc(16 * 4 * 4 * sizeof(float));
@@ -607,19 +620,19 @@ int main() {
     dim3 blockDimPool2(4, 4);
     dim3 gridDimPool2((4 + 3) / 4, (4 + 3) / 4, 16);
 
-    printf("[INFO] Launching pool2_kernel...\n");
+    
     pool2_shared_kernel<<<gridDimPool2, blockDimPool2>>>(d_conv2_output, d_pool2_output);
     cudaDeviceSynchronize();
     cudaCheckError();
-    printf("[INFO] pool2 done.\n");
+    
 
     // FC1
-    printf("[INFO] Reading fc1 weights...\n");
+    
     float* h_fc1_weights = (float*)malloc(120 * 256 * sizeof(float));
     float* h_fc1_biases = (float*)malloc(120 * sizeof(float));
     float* h_fc1_output = (float*)malloc(120 * sizeof(float));
-    read_fc1_weights("OutputFiles/fc1_weights.txt", h_fc1_weights);
-    read_fc1_biases("OutputFiles/fc1_biases.txt", h_fc1_biases);
+    read_fc1_weights("fc1_weights.txt", h_fc1_weights);
+    read_fc1_biases("fc1_biases.txt", h_fc1_biases);
 
 
     float *d_fc1_weights, *d_fc1_biases, *d_fc1_output, *d_fc1_input;
@@ -640,15 +653,15 @@ int main() {
     fc1_kernel<<<1, 120>>>(d_fc1_input, d_fc1_weights, d_fc1_biases, d_fc1_output);
     cudaDeviceSynchronize();
     cudaCheckError();
-    printf("[INFO] fc1 done.\n");
+    
 
     // FC2
-    printf("[INFO] Reading fc2 weights...\n");
+    
     float *h_fc2_weights = (float*)malloc(84 * 120 * sizeof(float));
     float *h_fc2_biases  = (float*)malloc(84 * sizeof(float));
     float *h_fc2_output  = (float*)malloc(84 * sizeof(float));
-    read_fc2_weights("OutputFiles/fc2_weights.txt", h_fc2_weights);
-    read_fc2_biases("OutputFiles/fc2_biases.txt", h_fc2_biases);
+    read_fc2_weights("fc2_weights.txt", h_fc2_weights);
+    read_fc2_biases("fc2_biases.txt", h_fc2_biases);
 
     float *d_fc2_weights, *d_fc2_biases, *d_fc2_output;
     cudaMalloc(&d_fc2_weights, 84 * 120 * sizeof(float));
@@ -663,15 +676,15 @@ int main() {
     fc2_kernel<<<1, 84>>>(d_fc1_output, d_fc2_weights, d_fc2_biases, d_fc2_output);
     cudaDeviceSynchronize();
     cudaCheckError();
-    printf("[INFO] fc2 done.\n");
+    
 
     // FC3
-    printf("[INFO] Reading fc3 weights...\n");
+    
     float *h_fc3_weights = (float*)malloc(10 * 84 * sizeof(float));
     float *h_fc3_biases  = (float*)malloc(10 * sizeof(float));
     float *h_fc3_output  = (float*)malloc(10 * sizeof(float));
-    read_fc3_weights("OutputFiles/fc3_weights.txt", h_fc3_weights);
-    read_fc3_biases("OutputFiles/fc3_biases.txt", h_fc3_biases);
+    read_fc3_weights("fc3_weights.txt", h_fc3_weights);
+    read_fc3_biases("fc3_biases.txt", h_fc3_biases);
 
     float *d_fc3_weights, *d_fc3_biases, *d_fc3_output;
     cudaMalloc(&d_fc3_weights, 10 * 84 * sizeof(float));
@@ -686,7 +699,7 @@ int main() {
     fc3_kernel<<<1, 10>>>(d_fc2_output, d_fc3_weights, d_fc3_biases, d_fc3_output);
     cudaDeviceSynchronize();
     cudaCheckError();
-    printf("[INFO] fc3 done.\n");
+    
 
     // Softmax
     float* d_probabilities;
@@ -697,7 +710,7 @@ int main() {
     softmax_kernel<<<1, 10>>>(d_fc3_output, d_probabilities, 10);
     cudaDeviceSynchronize();
     cudaCheckError();
-    printf("[INFO] softmax done.\n");
+    
 
     // Result
     cudaMemcpy(h_probabilities, d_probabilities, 10 * sizeof(float), cudaMemcpyDeviceToHost);
