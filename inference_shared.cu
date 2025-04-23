@@ -2,6 +2,9 @@
 #include <stdlib.h>
 #include <math.h>
 #include <cuda.h>
+#include <cuda_runtime.h>
+
+
 
 #define INPUT_SIZE 28
 #define FILTER_SIZE 5
@@ -126,76 +129,55 @@ __global__ void pool2_shared_kernel(
     const float* input,   // [16 x 8 x 8]
     float* output         // [16 x 4 x 4]
 ) {
-    const int fmap = blockIdx.z;
-    const int tx = threadIdx.x;
-    const int ty = threadIdx.y;
-    const int out_row = blockIdx.y * blockDim.y + ty;
-    const int out_col = blockIdx.x * blockDim.x + tx;
+    int fmap = blockIdx.z; // Feature map index (0–15)
+    int out_row = blockIdx.y * blockDim.y + threadIdx.y;
+    int out_col = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (out_row >= 4 || out_col >= 4) return;
 
-    // Shared memory tile for 2x2 region (+1 to prevent bank conflict or overlap)
-    __shared__ float tile[10][10];  // enough for 2x2 pooling on 8x8 with 2x2 stride
-
-    // Load the required 2x2 region into shared memory
     int in_row = out_row * 2;
     int in_col = out_col * 2;
 
-    // Each thread loads its 2x2 patch into shared memory
+    float max_val = -1e9;
     for (int i = 0; i < 2; ++i) {
         for (int j = 0; j < 2; ++j) {
             int r = in_row + i;
             int c = in_col + j;
-            if (r < 8 && c < 8) {
-                tile[ty * 2 + i][tx * 2 + j] = input[fmap * 64 + r * 8 + c];
-            }
+            float val = input[fmap * 64 + r * 8 + c];
+            if (val > max_val) max_val = val;
         }
     }
 
-    __syncthreads();
-
-    // Do pooling using shared memory
-    float max_val = -1e9;
-    for (int i = 0; i < 2; ++i) {
-        for (int j = 0; j < 2; ++j) {
-            max_val = fmaxf(max_val, tile[ty * 2 + i][tx * 2 + j]);
-        }
-    }
-
-    int out_idx = fmap * 16 + out_row * 4 + out_col;
-    output[out_idx] = max_val;
+    output[fmap * 16 + out_row * 4 + out_col] = max_val;
 }
+
 
 __global__ void conv2_shared_kernel(
     const float* input,       // [6 x 12 x 12]
-    const float* filters,     // [16 x 6 x 5 x 5] = 2400
+    const float* filters,     // [16 x 6 x 5 x 5]
     const float* biases,      // [16]
     float* output             // [16 x 8 x 8]
 ) {
-    const int out_ch = blockIdx.z;                     // output channel (0–15)
-    const int row = blockIdx.y * blockDim.y + threadIdx.y;
-    const int col = blockIdx.x * blockDim.x + threadIdx.x;
+    const int out_ch = blockIdx.z;
+    const int out_row = blockIdx.y * blockDim.y + threadIdx.y;
+    const int out_col = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if (row >= 8 || col >= 8) return;
+    if (out_row >= 8 || out_col >= 8) return;
 
-    // Shared memory tile: enough for 8x8 output + 4 halo → 12x12 region
-    __shared__ float tile[6][12 + 4][12 + 4]; // 6 input channels, 16x16 shared
+    // Shared memory tile padded to prevent bank conflicts
+    __shared__ float tile[6][12][13];  // [in_ch][row][col] → padding last dim
 
-    // Load shared memory for each input channel
+    int in_row_start = blockIdx.y * blockDim.y;
+    int in_col_start = blockIdx.x * blockDim.x;
+
     for (int c = 0; c < 6; ++c) {
-        int global_row = row + 0;
-        int global_col = col + 0;
-
-        for (int i = threadIdx.y; i < 12 + 4; i += blockDim.y) {
-            for (int j = threadIdx.x; j < 12 + 4; j += blockDim.x) {
-                int src_row = blockIdx.y * blockDim.y + i;
-                int src_col = blockIdx.x * blockDim.x + j;
-
-                float val = 0.0f;
-                if (src_row < 12 && src_col < 12)
-                    val = input[c * 144 + src_row * 12 + src_col];
-
-                tile[c][i][j] = val;
+        for (int i = threadIdx.y; i < 12; i += blockDim.y) {
+            for (int j = threadIdx.x; j < 12; j += blockDim.x) {
+                int global_row = in_row_start + i;
+                int global_col = in_col_start + j;
+                tile[c][i][j] = (global_row < 12 && global_col < 12)
+                    ? input[c * 144 + global_row * 12 + global_col]
+                    : 0.0f;
             }
         }
     }
@@ -207,19 +189,17 @@ __global__ void conv2_shared_kernel(
     for (int c = 0; c < 6; ++c) {
         for (int i = 0; i < 5; ++i) {
             for (int j = 0; j < 5; ++j) {
-                int t_row = threadIdx.y + i;
-                int t_col = threadIdx.x + j;
-
-                float val = tile[c][t_row][t_col];
-                int f_idx = out_ch * (6 * 25) + c * 25 + i * 5 + j;
-                sum += val * filters[f_idx];
+                float val = tile[c][threadIdx.y + i][threadIdx.x + j];
+                int filter_idx = out_ch * (6 * 25) + c * 25 + i * 5 + j;
+                sum += val * filters[filter_idx];
             }
         }
     }
 
-    int out_idx = out_ch * 64 + row * 8 + col;
-    output[out_idx] = fmaxf(0.0f, sum + biases[out_ch]);  // ReLU
+    int out_idx = out_ch * 64 + out_row * 8 + out_col;
+    output[out_idx] = fmaxf(0.0f, sum + biases[out_ch]); // ReLU
 }
+
 
 
 
@@ -229,58 +209,37 @@ __global__ void conv1_shared_kernel(
     const float* biases,      // [6]
     float* output             // [6 x 24 x 24]
 ) {
-    // Output coordinates
-    const int row = blockIdx.y * blockDim.y + threadIdx.y;
-    const int col = blockIdx.x * blockDim.x + threadIdx.x;
-    const int filter_id = blockIdx.z;
+    const int out_ch = blockIdx.z;
+    const int out_row = blockIdx.y * blockDim.y + threadIdx.y;
+    const int out_col = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if (row >= 24 || col >= 24) return;
+    if (out_row >= 24 || out_col >= 24) return;
 
-    // Shared memory tile size: enough for the block and its 5x5 filter footprint (halo)
-    // Tile = (blockDim.y + 4) x (blockDim.x + 4)
-    __shared__ float tile[32][32];  // assumes blockDim.x, y <= 28
+    // Shared memory tile (padded to avoid bank conflict)
+    __shared__ float tile[28][29];  // 28x28 input padded to 28x29
 
-    // Global index to load into shared memory
-    int input_row = row + threadIdx.y;
-    int input_col = col + threadIdx.x;
-
-    // Load into shared memory with boundary check
-    if (input_row < 28 && input_col < 28) {
-        tile[threadIdx.y][threadIdx.x] = input[input_row * 28 + input_col];
-    } else {
-        tile[threadIdx.y][threadIdx.x] = 0.0f;
-    }
-
-    // Also need halo region for filter (handle right & bottom edge if needed)
-    if (threadIdx.y < 5 && (row + 5) < 28) {
-        tile[threadIdx.y + blockDim.y][threadIdx.x] =
-            input[(input_row + blockDim.y) * 28 + input_col];
-    }
-
-    if (threadIdx.x < 5 && (col + 5) < 28) {
-        tile[threadIdx.y][threadIdx.x + blockDim.x] =
-            input[input_row * 28 + input_col + blockDim.x];
-    }
-
-    // Lower-right corner (to fully load halo)
-    if (threadIdx.x < 5 && threadIdx.y < 5 && (col + 5) < 28 && (row + 5) < 28) {
-        tile[threadIdx.y + blockDim.y][threadIdx.x + blockDim.x] =
-            input[(input_row + blockDim.y) * 28 + input_col + blockDim.x];
+    // Cooperative load of input
+    for (int i = threadIdx.y; i < 28; i += blockDim.y) {
+        for (int j = threadIdx.x; j < 28; j += blockDim.x) {
+            tile[i][j] = input[i * 28 + j];
+        }
     }
 
     __syncthreads();
 
-    // Convolve
     float sum = 0.0f;
-    for (int i = 0; i < 5; i++) {
-        for (int j = 0; j < 5; j++) {
-            sum += tile[threadIdx.y + i][threadIdx.x + j] *
-                   filters[filter_id * 25 + i * 5 + j];
+    for (int i = 0; i < 5; ++i) {
+        for (int j = 0; j < 5; ++j) {
+            int in_row = out_row + i;
+            int in_col = out_col + j;
+            float val = tile[in_row][in_col];
+            float weight = filters[out_ch * 25 + i * 5 + j];
+            sum += val * weight;
         }
     }
 
-    int out_idx = filter_id * 24 * 24 + row * 24 + col;
-    output[out_idx] = fmaxf(0.0f, sum + biases[filter_id]); // ReLU
+    int out_idx = out_ch * 576 + out_row * 24 + out_col;
+    output[out_idx] = fmaxf(0.0f, sum + biases[out_ch]); // ReLU
 }
 
 
@@ -531,6 +490,10 @@ void save_fc3_output(const char* filename, float* output) {
 	fclose(f);
 }
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <cuda_runtime.h>
+
 int main() {
     float *h_input, *h_filters, *h_biases, *h_output;
 
@@ -540,12 +503,9 @@ int main() {
     h_biases = (float*)malloc(NUM_FILTERS * sizeof(float));
     h_output = (float*)malloc(NUM_FILTERS * OUTPUT_SIZE * OUTPUT_SIZE * sizeof(float));
 
-    // Read from files with checks
-    
     read_input("input_image.txt", h_input);
     read_filters("conv1_weights.txt", h_filters);
     read_biases("conv1_biases.txt", h_biases);
-
 
     // Allocate device memory
     float *d_input, *d_filters, *d_biases, *d_output;
@@ -561,34 +521,24 @@ int main() {
     cudaMemcpy(d_biases, h_biases, NUM_FILTERS * sizeof(float), cudaMemcpyHostToDevice);
     cudaCheckError();
 
-    // Launch conv1
-    
-    dim3 blockDim(12, 12);  // safer with shared memory
+  
+    // Inference Kernels Start
+    dim3 blockDim(12, 12);
     dim3 gridDim((OUTPUT_SIZE + 11) / 12, (OUTPUT_SIZE + 11) / 12, NUM_FILTERS);
     conv1_shared_kernel<<<gridDim, blockDim>>>(d_input, d_filters, d_biases, d_output);
     cudaDeviceSynchronize();
     cudaCheckError();
-    
 
-    // Pool1
     float *d_pool1_output;
     cudaMalloc(&d_pool1_output, 6 * 12 * 12 * sizeof(float));
-    cudaCheckError();
-
     dim3 blockDimPool1(12, 12);
     dim3 gridDimPool1((12 + 11) / 12, (12 + 11) / 12, 6);
-
-    
     pool1_shared_kernel<<<gridDimPool1, blockDimPool1>>>(d_output, d_pool1_output);
     cudaDeviceSynchronize();
     cudaCheckError();
-    
 
-    // Conv2
-    
-    float* h_conv2_filters = (float*)malloc(2400 * sizeof(float)); // 16x6x25
+    float* h_conv2_filters = (float*)malloc(2400 * sizeof(float));
     float* h_conv2_biases = (float*)malloc(16 * sizeof(float));
-    float* h_conv2_output = (float*)malloc(16 * 8 * 8 * sizeof(float));
     read_conv2_filters("conv2_weights.txt", h_conv2_filters);
     read_conv2_biases("conv2_biases.txt", h_conv2_biases);
 
@@ -596,70 +546,42 @@ int main() {
     cudaMalloc(&d_conv2_filters, 2400 * sizeof(float));
     cudaMalloc(&d_conv2_biases, 16 * sizeof(float));
     cudaMalloc(&d_conv2_output, 16 * 8 * 8 * sizeof(float));
-    cudaCheckError();
-
     cudaMemcpy(d_conv2_filters, h_conv2_filters, 2400 * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_conv2_biases, h_conv2_biases, 16 * sizeof(float), cudaMemcpyHostToDevice);
-    cudaCheckError();
 
     dim3 blockDimConv2(8, 8);
     dim3 gridDimConv2((8 + 7) / 8, (8 + 7) / 8, 16);
-
-    
     conv2_shared_kernel<<<gridDimConv2, blockDimConv2>>>(d_pool1_output, d_conv2_filters, d_conv2_biases, d_conv2_output);
     cudaDeviceSynchronize();
     cudaCheckError();
-    
 
-    // Pool2
-    float* h_pool2_output = (float*)malloc(16 * 4 * 4 * sizeof(float));
     float* d_pool2_output;
     cudaMalloc(&d_pool2_output, 16 * 4 * 4 * sizeof(float));
-    cudaCheckError();
-
     dim3 blockDimPool2(4, 4);
     dim3 gridDimPool2((4 + 3) / 4, (4 + 3) / 4, 16);
-
-    
     pool2_shared_kernel<<<gridDimPool2, blockDimPool2>>>(d_conv2_output, d_pool2_output);
     cudaDeviceSynchronize();
     cudaCheckError();
-    
 
-    // FC1
-    
     float* h_fc1_weights = (float*)malloc(120 * 256 * sizeof(float));
     float* h_fc1_biases = (float*)malloc(120 * sizeof(float));
-    float* h_fc1_output = (float*)malloc(120 * sizeof(float));
     read_fc1_weights("fc1_weights.txt", h_fc1_weights);
     read_fc1_biases("fc1_biases.txt", h_fc1_biases);
-
 
     float *d_fc1_weights, *d_fc1_biases, *d_fc1_output, *d_fc1_input;
     cudaMalloc(&d_fc1_weights, 120 * 256 * sizeof(float));
     cudaMalloc(&d_fc1_biases, 120 * sizeof(float));
     cudaMalloc(&d_fc1_output, 120 * sizeof(float));
     cudaMalloc(&d_fc1_input, 256 * sizeof(float));
-    cudaCheckError();
-
     cudaMemcpy(d_fc1_weights, h_fc1_weights, 120 * 256 * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_fc1_biases, h_fc1_biases, 120 * sizeof(float), cudaMemcpyHostToDevice);
-    cudaCheckError();
-
     flatten_pool2<<<1, 256>>>(d_pool2_output, d_fc1_input);
-    cudaDeviceSynchronize();
-    cudaCheckError();
-
     fc1_kernel<<<1, 120>>>(d_fc1_input, d_fc1_weights, d_fc1_biases, d_fc1_output);
     cudaDeviceSynchronize();
     cudaCheckError();
-    
 
-    // FC2
-    
     float *h_fc2_weights = (float*)malloc(84 * 120 * sizeof(float));
     float *h_fc2_biases  = (float*)malloc(84 * sizeof(float));
-    float *h_fc2_output  = (float*)malloc(84 * sizeof(float));
     read_fc2_weights("fc2_weights.txt", h_fc2_weights);
     read_fc2_biases("fc2_biases.txt", h_fc2_biases);
 
@@ -667,22 +589,14 @@ int main() {
     cudaMalloc(&d_fc2_weights, 84 * 120 * sizeof(float));
     cudaMalloc(&d_fc2_biases,  84 * sizeof(float));
     cudaMalloc(&d_fc2_output,  84 * sizeof(float));
-    cudaCheckError();
-
     cudaMemcpy(d_fc2_weights, h_fc2_weights, 84 * 120 * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_fc2_biases,  h_fc2_biases,  84 * sizeof(float), cudaMemcpyHostToDevice);
-    cudaCheckError();
-
     fc2_kernel<<<1, 84>>>(d_fc1_output, d_fc2_weights, d_fc2_biases, d_fc2_output);
     cudaDeviceSynchronize();
     cudaCheckError();
-    
 
-    // FC3
-    
     float *h_fc3_weights = (float*)malloc(10 * 84 * sizeof(float));
     float *h_fc3_biases  = (float*)malloc(10 * sizeof(float));
-    float *h_fc3_output  = (float*)malloc(10 * sizeof(float));
     read_fc3_weights("fc3_weights.txt", h_fc3_weights);
     read_fc3_biases("fc3_biases.txt", h_fc3_biases);
 
@@ -690,32 +604,22 @@ int main() {
     cudaMalloc(&d_fc3_weights, 10 * 84 * sizeof(float));
     cudaMalloc(&d_fc3_biases,  10 * sizeof(float));
     cudaMalloc(&d_fc3_output,  10 * sizeof(float));
-    cudaCheckError();
-
     cudaMemcpy(d_fc3_weights, h_fc3_weights, 10 * 84 * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_fc3_biases,  h_fc3_biases,  10 * sizeof(float), cudaMemcpyHostToDevice);
-    cudaCheckError();
-
     fc3_kernel<<<1, 10>>>(d_fc2_output, d_fc3_weights, d_fc3_biases, d_fc3_output);
     cudaDeviceSynchronize();
     cudaCheckError();
-    
 
-    // Softmax
     float* d_probabilities;
     float* h_probabilities = (float*)malloc(10 * sizeof(float));
     cudaMalloc(&d_probabilities, 10 * sizeof(float));
-    cudaCheckError();
-
     softmax_kernel<<<1, 10>>>(d_fc3_output, d_probabilities, 10);
     cudaDeviceSynchronize();
     cudaCheckError();
-    
 
-    // Result
+
+    // Fetch result
     cudaMemcpy(h_probabilities, d_probabilities, 10 * sizeof(float), cudaMemcpyDeviceToHost);
-    cudaCheckError();
-
     int predicted = 0;
     float max_prob = h_probabilities[0];
     for (int i = 1; i < 10; ++i) {
@@ -730,7 +634,6 @@ int main() {
         printf("Class %d: %.4f\n", i, h_probabilities[i]);
     }
 
-    // Final error check
     cudaDeviceSynchronize();
     cudaCheckError();
     return 0;
