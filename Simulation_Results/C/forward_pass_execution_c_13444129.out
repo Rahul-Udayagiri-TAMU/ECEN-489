@@ -1,0 +1,140 @@
+Weights loaded successfully!
+Input image loaded and normalized successfully.
+Iteration - 1, Forward Pass Execution Time (CPU): 1.026000000 ms
+Predicted Digit: 2
+Class 0: 0.0000
+Class 1: 0.0000
+Class 2: 1.0000
+Class 3: 0.0000
+Class 4: 0.0000
+Class 5: 0.0000
+Class 6: 0.0000
+Class 7: 0.0000
+Class 8: 0.0000
+Class 9: 0.0000
+Weights loaded successfully!
+Input image loaded and normalized successfully.
+Iteration - 2, Forward Pass Execution Time (CPU): 1.010000000 ms
+Predicted Digit: 0
+Class 0: 0.9992
+Class 1: 0.0000
+Class 2: 0.0002
+Class 3: 0.0000
+Class 4: 0.0000
+Class 5: 0.0001
+Class 6: 0.0001
+Class 7: 0.0000
+Class 8: 0.0000
+Class 9: 0.0004
+Weights loaded successfully!
+Input image loaded and normalized successfully.
+Iteration - 3, Forward Pass Execution Time (CPU): 0.984000000 ms
+Predicted Digit: 9
+Class 0: 0.0000
+Class 1: 0.0000
+Class 2: 0.0000
+Class 3: 0.0000
+Class 4: 0.0008
+Class 5: 0.0000
+Class 6: 0.0000
+Class 7: 0.0003
+Class 8: 0.0055
+Class 9: 0.9934
+Weights loaded successfully!
+Input image loaded and normalized successfully.
+Iteration - 4, Forward Pass Execution Time (CPU): 0.982000000 ms
+Predicted Digit: 9
+Class 0: 0.0131
+Class 1: 0.0000
+Class 2: 0.0027
+Class 3: 0.0044
+Class 4: 0.0005
+Class 5: 0.0008
+Class 6: 0.0000
+Class 7: 0.0431
+Class 8: 0.0056
+Class 9: 0.9297
+Weights loaded successfully!
+Input image loaded and normalized successfully.
+Iteration - 5, Forward Pass Execution Time (CPU): 0.977000000 ms
+Predicted Digit: 3
+Class 0: 0.0000
+Class 1: 0.0000
+Class 2: 0.0000
+Class 3: 1.0000
+Class 4: 0.0000
+Class 5: 0.0000
+Class 6: 0.0000
+Class 7: 0.0000
+Class 8: 0.0000
+Class 9: 0.0000
+Weights loaded successfully!
+Input image loaded and normalized successfully.
+Iteration - 6, Forward Pass Execution Time (CPU): 0.980000000 ms
+Predicted Digit: 7
+Class 0: 0.0000
+Class 1: 0.0000
+Class 2: 0.0000
+Class 3: 0.0000
+Class 4: 0.0000
+Class 5: 0.0003
+Class 6: 0.0000
+Class 7: 0.9209
+Class 8: 0.0000
+Class 9: 0.0787
+Weights loaded successfully!
+Input image loaded and normalized successfully.
+Iteration - 7, Forward Pass Execution Time (CPU): 1.005000000 ms
+Predicted Digit: 0
+Class 0: 1.0000
+Class 1: 0.0000
+Class 2: 0.0000
+Class 3: 0.0000
+Class 4: 0.0000
+Class 5: 0.0000
+Class 6: 0.0000
+Class 7: 0.0000
+Class 8: 0.0000
+Class 9: 0.0000
+Weights loaded successfully!
+Input image loaded and normalized successfully.
+Iteration - 8, Forward Pass Execution Time (CPU): 1.012000000 ms
+Predicted Digit: 3
+Class 0: 0.0000
+Class 1: 0.0000
+Class 2: 0.0000
+Class 3: 1.0000
+Class 4: 0.0000
+Class 5: 0.0000
+Class 6: 0.0000
+Class 7: 0.0000
+Class 8: 0.0000
+Class 9: 0.0000
+Weights loaded successfully!
+Input image loaded and normalized successfully.
+Iteration - 9, Forward Pass Execution Time (CPU): 1.010000000 ms
+Predicted Digit: 0
+Class 0: 0.9999
+Class 1: 0.0000
+Class 2: 0.0000
+Class 3: 0.0000
+Class 4: 0.0000
+Class 5: 0.0000
+Class 6: 0.0000
+Class 7: 0.0000
+Class 8: 0.0000
+Class 9: 0.0001
+Weights loaded successfully!
+Input image loaded and normalized successfully.
+Iteration - 10, Forward Pass Execution Time (CPU): 1.010000000 ms
+Predicted Digit: 3
+Class 0: 0.0000
+Class 1: 0.0000
+Class 2: 0.0000
+Class 3: 1.0000
+Class 4: 0.0000
+Class 5: 0.0000
+Class 6: 0.0000
+Class 7: 0.0000
+Class 8: 0.0000
+Class 9: 0.0000

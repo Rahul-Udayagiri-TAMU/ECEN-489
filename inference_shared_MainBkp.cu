@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <math.h>
 #include <cuda.h>
+#include <cuda_runtime.h>
+
 
 
 #define INPUT_SIZE 28
@@ -251,6 +253,9 @@ __global__ void pool1_shared_kernel(
 	int out_col = blockIdx.x * blockDim.x + threadIdx.x;
 
 	if (out_row >= 12 || out_col >= 12) return;
+
+	// Shared memory tile for 2×2 pooling input
+	__shared__ float tile[2][2];
 
 	// Each thread loads its own 2x2 region (non-overlapping)
 	int in_row = out_row * 2;
@@ -527,9 +532,20 @@ int main() {
 		cudaCheckError();
 
 
+		// Inference Kernels Start
+		dim3 blockDim(12, 12);
+		dim3 gridDim((OUTPUT_SIZE + 11) / 12, (OUTPUT_SIZE + 11) / 12, NUM_FILTERS);
+		conv1_shared_kernel<<<gridDim, blockDim>>>(d_input, d_filters, d_biases, d_output);
+		cudaDeviceSynchronize();
+		cudaCheckError();
 
 		float *d_pool1_output;
 		cudaMalloc(&d_pool1_output, 6 * 12 * 12 * sizeof(float));
+		dim3 blockDimPool1(12, 12);
+		dim3 gridDimPool1((12 + 11) / 12, (12 + 11) / 12, 6);
+		pool1_shared_kernel<<<gridDimPool1, blockDimPool1>>>(d_output, d_pool1_output);
+		cudaDeviceSynchronize();
+		cudaCheckError();
 
 		float* h_conv2_filters = (float*)malloc(2400 * sizeof(float));
 		float* h_conv2_biases = (float*)malloc(16 * sizeof(float));
@@ -543,11 +559,19 @@ int main() {
 		cudaMemcpy(d_conv2_filters, h_conv2_filters, 2400 * sizeof(float), cudaMemcpyHostToDevice);
 		cudaMemcpy(d_conv2_biases, h_conv2_biases, 16 * sizeof(float), cudaMemcpyHostToDevice);
 
+		dim3 blockDimConv2(8, 8);
+		dim3 gridDimConv2((8 + 7) / 8, (8 + 7) / 8, 16);
+		conv2_shared_kernel<<<gridDimConv2, blockDimConv2>>>(d_pool1_output, d_conv2_filters, d_conv2_biases, d_conv2_output);
+		cudaDeviceSynchronize();
+		cudaCheckError();
 
 		float* d_pool2_output;
 		cudaMalloc(&d_pool2_output, 16 * 4 * 4 * sizeof(float));
-
-
+		dim3 blockDimPool2(4, 4);
+		dim3 gridDimPool2((4 + 3) / 4, (4 + 3) / 4, 16);
+		pool2_shared_kernel<<<gridDimPool2, blockDimPool2>>>(d_conv2_output, d_pool2_output);
+		cudaDeviceSynchronize();
+		cudaCheckError();
 
 		float* h_fc1_weights = (float*)malloc(120 * 256 * sizeof(float));
 		float* h_fc1_biases = (float*)malloc(120 * sizeof(float));
@@ -561,6 +585,10 @@ int main() {
 		cudaMalloc(&d_fc1_input, 256 * sizeof(float));
 		cudaMemcpy(d_fc1_weights, h_fc1_weights, 120 * 256 * sizeof(float), cudaMemcpyHostToDevice);
 		cudaMemcpy(d_fc1_biases, h_fc1_biases, 120 * sizeof(float), cudaMemcpyHostToDevice);
+		flatten_pool2<<<1, 256>>>(d_pool2_output, d_fc1_input);
+		fc1_kernel<<<1, 120>>>(d_fc1_input, d_fc1_weights, d_fc1_biases, d_fc1_output);
+		cudaDeviceSynchronize();
+		cudaCheckError();
 
 		float *h_fc2_weights = (float*)malloc(84 * 120 * sizeof(float));
 		float *h_fc2_biases  = (float*)malloc(84 * sizeof(float));
@@ -573,7 +601,10 @@ int main() {
 		cudaMalloc(&d_fc2_output,  84 * sizeof(float));
 		cudaMemcpy(d_fc2_weights, h_fc2_weights, 84 * 120 * sizeof(float), cudaMemcpyHostToDevice);
 		cudaMemcpy(d_fc2_biases,  h_fc2_biases,  84 * sizeof(float), cudaMemcpyHostToDevice);
-	
+		fc2_kernel<<<1, 84>>>(d_fc1_output, d_fc2_weights, d_fc2_biases, d_fc2_output);
+		cudaDeviceSynchronize();
+		cudaCheckError();
+
 		float *h_fc3_weights = (float*)malloc(10 * 84 * sizeof(float));
 		float *h_fc3_biases  = (float*)malloc(10 * sizeof(float));
 		read_fc3_weights("CUDA_FLATTENED_WEIGHTS/fc3_weights.txt", h_fc3_weights);
@@ -585,59 +616,17 @@ int main() {
 		cudaMalloc(&d_fc3_output,  10 * sizeof(float));
 		cudaMemcpy(d_fc3_weights, h_fc3_weights, 10 * 84 * sizeof(float), cudaMemcpyHostToDevice);
 		cudaMemcpy(d_fc3_biases,  h_fc3_biases,  10 * sizeof(float), cudaMemcpyHostToDevice);
+		fc3_kernel<<<1, 10>>>(d_fc2_output, d_fc3_weights, d_fc3_biases, d_fc3_output);
+		cudaDeviceSynchronize();
+		cudaCheckError();
 
 		float* d_probabilities;
 		float* h_probabilities = (float*)malloc(10 * sizeof(float));
 		cudaMalloc(&d_probabilities, 10 * sizeof(float));
-
-
-		cudaEvent_t start, stop;
-		cudaEventCreate(&start);
-		cudaEventCreate(&stop);
-		cudaEventRecord(start);
-		// Inference Kernels Start
-		dim3 blockDim(12, 12);
-		dim3 gridDim((OUTPUT_SIZE + 11) / 12, (OUTPUT_SIZE + 11) / 12, NUM_FILTERS);
-		conv1_shared_kernel<<<gridDim, blockDim>>>(d_input, d_filters, d_biases, d_output);
-		cudaDeviceSynchronize();
-		
-		dim3 blockDimPool1(12, 12);
-		dim3 gridDimPool1((12 + 11) / 12, (12 + 11) / 12, 6);
-		pool1_shared_kernel<<<gridDimPool1, blockDimPool1>>>(d_output, d_pool1_output);
-		cudaDeviceSynchronize();
-		
-		dim3 blockDimConv2(8, 8);
-		dim3 gridDimConv2((8 + 7) / 8, (8 + 7) / 8, 16);
-		conv2_shared_kernel<<<gridDimConv2, blockDimConv2>>>(d_pool1_output, d_conv2_filters, d_conv2_biases, d_conv2_output);
-		cudaDeviceSynchronize();
-		
-		dim3 blockDimPool2(4, 4);
-		dim3 gridDimPool2((4 + 3) / 4, (4 + 3) / 4, 16);
-		pool2_shared_kernel<<<gridDimPool2, blockDimPool2>>>(d_conv2_output, d_pool2_output);
-		cudaDeviceSynchronize();
-
-		flatten_pool2<<<1, 256>>>(d_pool2_output, d_fc1_input);
-		cudaDeviceSynchronize();
-		
-		fc1_kernel<<<1, 120>>>(d_fc1_input, d_fc1_weights, d_fc1_biases, d_fc1_output);
-		cudaDeviceSynchronize();
-
-		fc2_kernel<<<1, 84>>>(d_fc1_output, d_fc2_weights, d_fc2_biases, d_fc2_output);
-		cudaDeviceSynchronize();
-
-		fc3_kernel<<<1, 10>>>(d_fc2_output, d_fc3_weights, d_fc3_biases, d_fc3_output);
-		cudaDeviceSynchronize();
-
 		softmax_kernel<<<1, 10>>>(d_fc3_output, d_probabilities, 10);
 		cudaDeviceSynchronize();
-		
-		cudaEventRecord(stop);
-		cudaEventSynchronize(stop);
-		
-		float milliseconds = 0;
-		cudaEventElapsedTime(&milliseconds, start, stop);
+		cudaCheckError();
 
-		printf("Iteration - %d, Time taken for Forward Pass execution : %9f\n", iter, milliseconds);
 
 		// Fetch result
 		cudaMemcpy(h_probabilities, d_probabilities, 10 * sizeof(float), cudaMemcpyDeviceToHost);
