@@ -1,0 +1,698 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+#include <cuda.h>
+
+
+#define INPUT_SIZE 28
+#define FILTER_SIZE 5
+#define OUTPUT_SIZE 24
+#define NUM_FILTERS 6
+
+
+#define CONV2_IN_CHANNELS 6
+#define CONV2_OUT_CHANNELS 16
+#define CONV2_FILTER_SIZE 5
+#define CONV2_OUT_SIZE 8
+#define CONV2_NUM_WEIGHTS (CONV2_OUT_CHANNELS * CONV2_IN_CHANNELS * CONV2_FILTER_SIZE * CONV2_FILTER_SIZE)  // 2400
+
+
+
+#define cudaCheckError() {\
+	cudaError_t e = cudaGetLastError();\
+	\
+	if(e != cudaSuccess) {\
+		printf("CUDA Failure %s, %d: %s\n", __FILE__, __LINE__, cudaGetErrorString(e));\
+	}\
+}\
+
+
+__global__ void softmax_kernel(const float* input, float* output, int length) {
+	__shared__ float max_val;
+	__shared__ float sum;
+
+	// Step 1: Find max value for numerical stability (thread 0)
+	if (threadIdx.x == 0) {
+		max_val = input[0];
+		for (int i = 1; i < length; ++i) {
+			if (input[i] > max_val) max_val = input[i];
+		}
+	}
+	__syncthreads();
+
+	// Step 2: Compute exponentials and accumulate sum
+	if (threadIdx.x < length) {
+		output[threadIdx.x] = expf(input[threadIdx.x] - max_val);
+	}
+	__syncthreads();
+
+	// Step 3: Compute sum of exponentials (thread 0)
+	if (threadIdx.x == 0) {
+		sum = 0.0f;
+		for (int i = 0; i < length; ++i) {
+			sum += output[i];
+		}
+	}
+	__syncthreads();
+
+	// Step 4: Normalize to get probabilities
+	if (threadIdx.x < length) {
+		output[threadIdx.x] /= sum;
+	}
+}
+
+__global__ void fc3_kernel(
+		const float* input,   // [84]
+		const float* weights, // [10 x 84]
+		const float* biases,  // [10]
+		float* output         // [10]
+		) {
+	int neuron_id = blockIdx.x * blockDim.x + threadIdx.x;
+	if (neuron_id >= 10) return;
+
+	float sum = 0.0f;
+	for (int i = 0; i < 84; ++i) {
+		sum += input[i] * weights[neuron_id * 84 + i];
+	}
+
+	output[neuron_id] = sum + biases[neuron_id]; // No ReLU here
+}
+
+__global__ void fc2_kernel(
+		const float* input,   // [120]
+		const float* weights, // [84 x 120]
+		const float* biases,  // [84]
+		float* output         // [84]
+		) {
+	int neuron_id = blockIdx.x * blockDim.x + threadIdx.x;
+	if (neuron_id >= 84) return;
+
+	float sum = 0.0f;
+	for (int i = 0; i < 120; ++i) {
+		sum += input[i] * weights[neuron_id * 120 + i];
+	}
+
+	output[neuron_id] = fmaxf(0.0f, sum + biases[neuron_id]); // ReLU
+}
+
+__global__ void fc1_kernel(
+		const float* input,   // [256]
+		const float* weights, // [120 x 256]
+		const float* biases,  // [120]
+		float* output         // [120]
+		) {
+	int neuron_id = blockIdx.x * blockDim.x + threadIdx.x;
+	if (neuron_id >= 120) return;
+
+	float sum = 0.0f;
+	for (int i = 0; i < 256; ++i) {
+		sum += input[i] * weights[neuron_id * 256 + i];
+	}
+
+	output[neuron_id] = fmaxf(0.0f, sum + biases[neuron_id]); // ReLU
+}
+
+
+__global__ void flatten_pool2(
+		const float* input,  // [16 x 4 x 4]
+		float* output        // [256]
+		) {
+	int idx = blockIdx.x * blockDim.x + threadIdx.x;
+	if (idx >= 256) return;
+
+	output[idx] = input[idx]; // data is already in correct layout
+}
+
+__global__ void pool2_shared_kernel(
+		const float* input,   // [16 x 8 x 8]
+		float* output         // [16 x 4 x 4]
+		) {
+	int fmap = blockIdx.z; // Feature map index (0–15)
+	int out_row = blockIdx.y * blockDim.y + threadIdx.y;
+	int out_col = blockIdx.x * blockDim.x + threadIdx.x;
+
+	if (out_row >= 4 || out_col >= 4) return;
+
+	int in_row = out_row * 2;
+	int in_col = out_col * 2;
+
+	float max_val = -1e9;
+	for (int i = 0; i < 2; ++i) {
+		for (int j = 0; j < 2; ++j) {
+			int r = in_row + i;
+			int c = in_col + j;
+			float val = input[fmap * 64 + r * 8 + c];
+			if (val > max_val) max_val = val;
+		}
+	}
+
+	output[fmap * 16 + out_row * 4 + out_col] = max_val;
+}
+
+
+__global__ void conv2_shared_kernel(
+		const float* input,       // [6 x 12 x 12]
+		const float* filters,     // [16 x 6 x 5 x 5]
+		const float* biases,      // [16]
+		float* output             // [16 x 8 x 8]
+		) {
+	const int out_ch = blockIdx.z;
+	const int out_row = blockIdx.y * blockDim.y + threadIdx.y;
+	const int out_col = blockIdx.x * blockDim.x + threadIdx.x;
+
+	if (out_row >= 8 || out_col >= 8) return;
+
+	// Shared memory tile padded to prevent bank conflicts
+	__shared__ float tile[6][12][13];  // [in_ch][row][col] → padding last dim
+
+	int in_row_start = blockIdx.y * blockDim.y;
+	int in_col_start = blockIdx.x * blockDim.x;
+
+	for (int c = 0; c < 6; ++c) {
+		for (int i = threadIdx.y; i < 12; i += blockDim.y) {
+			for (int j = threadIdx.x; j < 12; j += blockDim.x) {
+				int global_row = in_row_start + i;
+				int global_col = in_col_start + j;
+				tile[c][i][j] = (global_row < 12 && global_col < 12)
+					? input[c * 144 + global_row * 12 + global_col]
+					: 0.0f;
+			}
+		}
+	}
+
+	__syncthreads();
+
+	float sum = 0.0f;
+
+	for (int c = 0; c < 6; ++c) {
+		for (int i = 0; i < 5; ++i) {
+			for (int j = 0; j < 5; ++j) {
+				float val = tile[c][threadIdx.y + i][threadIdx.x + j];
+				int filter_idx = out_ch * (6 * 25) + c * 25 + i * 5 + j;
+				sum += val * filters[filter_idx];
+			}
+		}
+	}
+
+	int out_idx = out_ch * 64 + out_row * 8 + out_col;
+	output[out_idx] = fmaxf(0.0f, sum + biases[out_ch]); // ReLU
+}
+
+
+
+
+__global__ void conv1_shared_kernel(
+		const float* input,       // [28 x 28]
+		const float* filters,     // [6 x 5 x 5]
+		const float* biases,      // [6]
+		float* output             // [6 x 24 x 24]
+		) {
+	const int out_ch = blockIdx.z;
+	const int out_row = blockIdx.y * blockDim.y + threadIdx.y;
+	const int out_col = blockIdx.x * blockDim.x + threadIdx.x;
+
+	if (out_row >= 24 || out_col >= 24) return;
+
+	// Shared memory tile (padded to avoid bank conflict)
+	__shared__ float tile[28][29];  // 28x28 input padded to 28x29
+
+	// Cooperative load of input
+	for (int i = threadIdx.y; i < 28; i += blockDim.y) {
+		for (int j = threadIdx.x; j < 28; j += blockDim.x) {
+			tile[i][j] = input[i * 28 + j];
+		}
+	}
+
+	__syncthreads();
+
+	float sum = 0.0f;
+	for (int i = 0; i < 5; ++i) {
+		for (int j = 0; j < 5; ++j) {
+			int in_row = out_row + i;
+			int in_col = out_col + j;
+			float val = tile[in_row][in_col];
+			float weight = filters[out_ch * 25 + i * 5 + j];
+			sum += val * weight;
+		}
+	}
+
+	int out_idx = out_ch * 576 + out_row * 24 + out_col;
+	output[out_idx] = fmaxf(0.0f, sum + biases[out_ch]); // ReLU
+}
+
+
+
+__global__ void pool1_shared_kernel(
+		const float* input,    // [6 × 24 × 24]
+		float* output          // [6 × 12 × 12]
+		) {
+	int fmap = blockIdx.z; // Feature map index (0–5)
+	int out_row = blockIdx.y * blockDim.y + threadIdx.y;
+	int out_col = blockIdx.x * blockDim.x + threadIdx.x;
+
+	if (out_row >= 12 || out_col >= 12) return;
+
+	// Each thread loads its own 2x2 region (non-overlapping)
+	int in_row = out_row * 2;
+	int in_col = out_col * 2;
+
+	float max_val = -1e9;
+	for (int i = 0; i < 2; ++i) {
+		for (int j = 0; j < 2; ++j) {
+			int idx = fmap * 24 * 24 + (in_row + i) * 24 + (in_col + j);
+			float val = input[idx];
+			if (val > max_val) max_val = val;
+		}
+	}
+
+	int out_idx = fmap * 12 * 12 + out_row * 12 + out_col;
+	output[out_idx] = max_val;
+}
+
+
+
+// Helper function to read flattened input (28x28 = 784)
+void read_input(const char* filename, float* input) {
+	FILE* f = fopen(filename, "r");
+	if (!f) {
+		printf("Error: Cannot open %s\n", filename);
+		exit(1);
+	}
+
+	for (int i = 0; i < 28 * 28; i++) {
+		if (fscanf(f, "%f", &input[i]) != 1) {
+			printf("Error: Failed to read float %d from %s\n", i, filename);
+			fclose(f);
+			exit(1);
+		}
+	}
+
+	fclose(f);
+}
+
+// Read filters: 6 filters of size 5x5 (total 6x25)
+void read_filters(const char* filename, float* filters) {
+	FILE* f = fopen(filename, "r");
+	if (!f) {
+		printf("Error: Cannot open %s\n", filename);
+		exit(1);
+	}
+
+	for (int i = 0; i < NUM_FILTERS * 25; i++) {
+		if (fscanf(f, "%f", &filters[i]) != 1) {
+			printf("Error: Failed to read float %d from %s\n", i, filename);
+			fclose(f);
+			exit(1);
+		}
+	}
+
+	fclose(f);
+}
+
+// Read biases: 6 biases
+void read_biases(const char* filename, float* biases) {
+	FILE* f = fopen(filename, "r");
+	if (!f) {
+		printf("Error: Cannot open %s\n", filename);
+		exit(1);
+	}
+
+	for (int i = 0; i < NUM_FILTERS; i++) {
+		if (fscanf(f, "%f", &biases[i]) != 1) {
+			printf("Error: Failed to read float %d from %s\n", i, filename);
+			fclose(f);
+			exit(1);
+		}
+	}
+
+	fclose(f);
+}
+
+
+
+void read_conv2_filters(const char* filename, float* filters) {
+	FILE* f = fopen(filename, "r");
+	for (int i = 0; i < CONV2_NUM_WEIGHTS; i++) {
+		fscanf(f, "%f", &filters[i]);
+	}
+	fclose(f);
+}
+
+void read_conv2_biases(const char* filename, float* biases) {
+	FILE* f = fopen(filename, "r");
+	for (int i = 0; i < CONV2_OUT_CHANNELS; i++) {
+		fscanf(f, "%f", &biases[i]);
+	}
+	fclose(f);
+}
+
+
+
+
+void read_fc1_weights(const char* filename, float* weights) {
+	FILE* f = fopen(filename, "r");
+	for (int i = 0; i < 120 * 256; i++) {
+		fscanf(f, "%f", &weights[i]);
+	}
+	fclose(f);
+}
+
+void read_fc1_biases(const char* filename, float* biases) {
+	FILE* f = fopen(filename, "r");
+	for (int i = 0; i < 120; i++) {
+		fscanf(f, "%f", &biases[i]);
+	}
+	fclose(f);
+}
+
+
+void read_fc2_weights(const char* filename, float* weights) {
+	FILE* f = fopen(filename, "r");
+	for (int i = 0; i < 84 * 120; i++) {
+		fscanf(f, "%f", &weights[i]);
+	}
+	fclose(f);
+}
+
+void read_fc2_biases(const char* filename, float* biases) {
+	FILE* f = fopen(filename, "r");
+	for (int i = 0; i < 84; i++) {
+		fscanf(f, "%f", &biases[i]);
+	}
+	fclose(f);
+}
+
+
+void read_fc3_weights(const char* filename, float* weights) {
+	FILE* f = fopen(filename, "r");
+	for (int i = 0; i < 10 * 84; i++) {
+		fscanf(f, "%f", &weights[i]);
+	}
+	fclose(f);
+}
+
+void read_fc3_biases(const char* filename, float* biases) {
+	FILE* f = fopen(filename, "r");
+	for (int i = 0; i < 10; i++) {
+		fscanf(f, "%f", &biases[i]);
+	}
+	fclose(f);
+}
+
+// Save output
+void save_output(const char* filename, float* output) {
+	FILE* f = fopen(filename, "w");
+	for (int f_id = 0; f_id < NUM_FILTERS; f_id++) {
+		for (int i = 0; i < OUTPUT_SIZE; i++) {
+			for (int j = 0; j < OUTPUT_SIZE; j++) {
+				int idx = f_id * OUTPUT_SIZE * OUTPUT_SIZE + i * OUTPUT_SIZE + j;
+				fprintf(f, "%.6f ", output[idx]);
+			}
+			fprintf(f, "\n");
+		}
+		fprintf(f, "\n");
+	}
+	fclose(f);
+}
+
+void save_pool1_output(const char* filename, float* output) {
+	FILE* f = fopen(filename, "w");
+	for (int f_idx = 0; f_idx < 6; f_idx++) {
+		for (int i = 0; i < 12; i++) {
+			for (int j = 0; j < 12; j++) {
+				int idx = f_idx * 144 + i * 12 + j;
+				fprintf(f, "%.6f ", output[idx]);
+			}
+			fprintf(f, "\n");
+		}
+		fprintf(f, "\n");
+	}
+	fclose(f);
+}
+
+void save_conv2_output(const char* filename, float* output) {
+	FILE* f = fopen(filename, "w");
+	for (int f_id = 0; f_id < 16; f_id++) {
+		for (int i = 0; i < 8; i++) {
+			for (int j = 0; j < 8; j++) {
+				int idx = f_id * 64 + i * 8 + j;
+				fprintf(f, "%.6f ", output[idx]);
+			}
+			fprintf(f, "\n");
+		}
+		fprintf(f, "\n");
+	}
+	fclose(f);
+}
+
+void save_pool2_output(const char* filename, float* output) {
+	FILE* f = fopen(filename, "w");
+	for (int f_id = 0; f_id < 16; f_id++) {
+		for (int i = 0; i < 4; i++) {
+			for (int j = 0; j < 4; j++) {
+				int idx = f_id * 16 + i * 4 + j;
+				fprintf(f, "%.6f ", output[idx]);
+			}
+			fprintf(f, "\n");
+		}
+		fprintf(f, "\n");
+	}
+	fclose(f);
+}
+
+void save_fc1_output(const char* filename, float* output) {
+	FILE* f = fopen(filename, "w");
+	for (int i = 0; i < 120; ++i) {
+		fprintf(f, "%.6f\n", output[i]);
+	}
+	fclose(f);
+}
+
+void save_fc2_output(const char* filename, float* output) {
+	FILE* f = fopen(filename, "w");
+	for (int i = 0; i < 84; i++) {
+		fprintf(f, "%.6f\n", output[i]);
+	}
+	fclose(f);
+}
+
+
+void save_fc3_output(const char* filename, float* output) {
+	FILE* f = fopen(filename, "w");
+	for (int i = 0; i < 10; i++) {
+		fprintf(f, "%.6f\n", output[i]);
+	}
+	fclose(f);
+}
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <cuda_runtime.h>
+
+int main() {
+
+	for (int iter = 1; iter <= 10; iter++) {
+		float *h_input, *h_filters, *h_biases;
+
+		// Allocate host memory
+		h_input = (float*)malloc(28 * 28 * sizeof(float));
+		h_filters = (float*)malloc(NUM_FILTERS * 25 * sizeof(float));
+		h_biases = (float*)malloc(NUM_FILTERS * sizeof(float));
+
+
+		char input_image_file_path_string[100] = "CUDA_FLATTENED_WEIGHTS/img_";
+		char str[20];
+		sprintf(str, "%d", iter);
+		char txt_extension[10] = ".txt";
+		strcat(input_image_file_path_string, str);
+		strcat(input_image_file_path_string, txt_extension);
+		// Read from files
+
+		read_input(input_image_file_path_string, h_input);
+		read_filters("CUDA_FLATTENED_WEIGHTS/conv1_weights.txt", h_filters);
+		read_biases("CUDA_FLATTENED_WEIGHTS/conv1_biases.txt", h_biases);
+
+		// Allocate device memory
+		float *d_input, *d_filters, *d_biases, *d_output;
+		cudaMalloc(&d_input, 28 * 28 * sizeof(float));
+		cudaMalloc(&d_filters, NUM_FILTERS * 25 * sizeof(float));
+		cudaMalloc(&d_biases, NUM_FILTERS * sizeof(float));
+		cudaMalloc(&d_output, NUM_FILTERS * OUTPUT_SIZE * OUTPUT_SIZE * sizeof(float));
+		cudaCheckError();
+
+		// Copy data to device
+		cudaMemcpy(d_input, h_input, 28 * 28 * sizeof(float), cudaMemcpyHostToDevice);
+		cudaMemcpy(d_filters, h_filters, NUM_FILTERS * 25 * sizeof(float), cudaMemcpyHostToDevice);
+		cudaMemcpy(d_biases, h_biases, NUM_FILTERS * sizeof(float), cudaMemcpyHostToDevice);
+		cudaCheckError();
+
+
+
+		float *d_pool1_output;
+		cudaMalloc(&d_pool1_output, 6 * 12 * 12 * sizeof(float));
+
+		float* h_conv2_filters = (float*)malloc(2400 * sizeof(float));
+		float* h_conv2_biases = (float*)malloc(16 * sizeof(float));
+		read_conv2_filters("CUDA_FLATTENED_WEIGHTS/conv2_weights.txt", h_conv2_filters);
+		read_conv2_biases("CUDA_FLATTENED_WEIGHTS/conv2_biases.txt", h_conv2_biases);
+
+		float *d_conv2_filters, *d_conv2_biases, *d_conv2_output;
+		cudaMalloc(&d_conv2_filters, 2400 * sizeof(float));
+		cudaMalloc(&d_conv2_biases, 16 * sizeof(float));
+		cudaMalloc(&d_conv2_output, 16 * 8 * 8 * sizeof(float));
+		cudaMemcpy(d_conv2_filters, h_conv2_filters, 2400 * sizeof(float), cudaMemcpyHostToDevice);
+		cudaMemcpy(d_conv2_biases, h_conv2_biases, 16 * sizeof(float), cudaMemcpyHostToDevice);
+
+
+		float* d_pool2_output;
+		cudaMalloc(&d_pool2_output, 16 * 4 * 4 * sizeof(float));
+
+
+
+		float* h_fc1_weights = (float*)malloc(120 * 256 * sizeof(float));
+		float* h_fc1_biases = (float*)malloc(120 * sizeof(float));
+		read_fc1_weights("CUDA_FLATTENED_WEIGHTS/fc1_weights.txt", h_fc1_weights);
+		read_fc1_biases("CUDA_FLATTENED_WEIGHTS/fc1_biases.txt", h_fc1_biases);
+
+		float *d_fc1_weights, *d_fc1_biases, *d_fc1_output, *d_fc1_input;
+		cudaMalloc(&d_fc1_weights, 120 * 256 * sizeof(float));
+		cudaMalloc(&d_fc1_biases, 120 * sizeof(float));
+		cudaMalloc(&d_fc1_output, 120 * sizeof(float));
+		cudaMalloc(&d_fc1_input, 256 * sizeof(float));
+		cudaMemcpy(d_fc1_weights, h_fc1_weights, 120 * 256 * sizeof(float), cudaMemcpyHostToDevice);
+		cudaMemcpy(d_fc1_biases, h_fc1_biases, 120 * sizeof(float), cudaMemcpyHostToDevice);
+
+		float *h_fc2_weights = (float*)malloc(84 * 120 * sizeof(float));
+		float *h_fc2_biases  = (float*)malloc(84 * sizeof(float));
+		read_fc2_weights("CUDA_FLATTENED_WEIGHTS/fc2_weights.txt", h_fc2_weights);
+		read_fc2_biases("CUDA_FLATTENED_WEIGHTS/fc2_biases.txt", h_fc2_biases);
+
+		float *d_fc2_weights, *d_fc2_biases, *d_fc2_output;
+		cudaMalloc(&d_fc2_weights, 84 * 120 * sizeof(float));
+		cudaMalloc(&d_fc2_biases,  84 * sizeof(float));
+		cudaMalloc(&d_fc2_output,  84 * sizeof(float));
+		cudaMemcpy(d_fc2_weights, h_fc2_weights, 84 * 120 * sizeof(float), cudaMemcpyHostToDevice);
+		cudaMemcpy(d_fc2_biases,  h_fc2_biases,  84 * sizeof(float), cudaMemcpyHostToDevice);
+	
+		float *h_fc3_weights = (float*)malloc(10 * 84 * sizeof(float));
+		float *h_fc3_biases  = (float*)malloc(10 * sizeof(float));
+		read_fc3_weights("CUDA_FLATTENED_WEIGHTS/fc3_weights.txt", h_fc3_weights);
+		read_fc3_biases("CUDA_FLATTENED_WEIGHTS/fc3_biases.txt", h_fc3_biases);
+
+		float *d_fc3_weights, *d_fc3_biases, *d_fc3_output;
+		cudaMalloc(&d_fc3_weights, 10 * 84 * sizeof(float));
+		cudaMalloc(&d_fc3_biases,  10 * sizeof(float));
+		cudaMalloc(&d_fc3_output,  10 * sizeof(float));
+		cudaMemcpy(d_fc3_weights, h_fc3_weights, 10 * 84 * sizeof(float), cudaMemcpyHostToDevice);
+		cudaMemcpy(d_fc3_biases,  h_fc3_biases,  10 * sizeof(float), cudaMemcpyHostToDevice);
+
+		float* d_probabilities;
+		float* h_probabilities = (float*)malloc(10 * sizeof(float));
+		cudaMalloc(&d_probabilities, 10 * sizeof(float));
+
+
+		cudaEvent_t start, stop;
+		cudaEventCreate(&start);
+		cudaEventCreate(&stop);
+		cudaEventRecord(start);
+		// Inference Kernels Start
+		dim3 blockDim(12, 12);
+		dim3 gridDim((OUTPUT_SIZE + 11) / 12, (OUTPUT_SIZE + 11) / 12, NUM_FILTERS);
+		conv1_shared_kernel<<<gridDim, blockDim>>>(d_input, d_filters, d_biases, d_output);
+		cudaDeviceSynchronize();
+		
+		dim3 blockDimPool1(12, 12);
+		dim3 gridDimPool1((12 + 11) / 12, (12 + 11) / 12, 6);
+		pool1_shared_kernel<<<gridDimPool1, blockDimPool1>>>(d_output, d_pool1_output);
+		cudaDeviceSynchronize();
+		
+		dim3 blockDimConv2(8, 8);
+		dim3 gridDimConv2((8 + 7) / 8, (8 + 7) / 8, 16);
+		conv2_shared_kernel<<<gridDimConv2, blockDimConv2>>>(d_pool1_output, d_conv2_filters, d_conv2_biases, d_conv2_output);
+		cudaDeviceSynchronize();
+		
+		dim3 blockDimPool2(4, 4);
+		dim3 gridDimPool2((4 + 3) / 4, (4 + 3) / 4, 16);
+		pool2_shared_kernel<<<gridDimPool2, blockDimPool2>>>(d_conv2_output, d_pool2_output);
+		cudaDeviceSynchronize();
+
+		flatten_pool2<<<1, 256>>>(d_pool2_output, d_fc1_input);
+		cudaDeviceSynchronize();
+		
+		fc1_kernel<<<1, 120>>>(d_fc1_input, d_fc1_weights, d_fc1_biases, d_fc1_output);
+		cudaDeviceSynchronize();
+
+		fc2_kernel<<<1, 84>>>(d_fc1_output, d_fc2_weights, d_fc2_biases, d_fc2_output);
+		cudaDeviceSynchronize();
+
+		fc3_kernel<<<1, 10>>>(d_fc2_output, d_fc3_weights, d_fc3_biases, d_fc3_output);
+		cudaDeviceSynchronize();
+
+		softmax_kernel<<<1, 10>>>(d_fc3_output, d_probabilities, 10);
+		cudaDeviceSynchronize();
+		
+		cudaEventRecord(stop);
+		cudaEventSynchronize(stop);
+		
+		float milliseconds = 0;
+		cudaEventElapsedTime(&milliseconds, start, stop);
+
+		printf("Iteration - %d, Time taken for Forward Pass execution : %9f\n", iter, milliseconds);
+
+		// Fetch result
+		cudaMemcpy(h_probabilities, d_probabilities, 10 * sizeof(float), cudaMemcpyDeviceToHost);
+		int predicted = 0;
+		float max_prob = h_probabilities[0];
+		for (int i = 1; i < 10; ++i) {
+			if (h_probabilities[i] > max_prob) {
+				max_prob = h_probabilities[i];
+				predicted = i;
+			}
+		}
+
+		printf("Predicted Digit: %d\n", predicted);
+		for (int i = 0; i < 10; ++i) {
+			printf("Class %d: %.4f\n", i, h_probabilities[i]);
+		}
+
+		cudaDeviceSynchronize();
+
+		free(h_input);
+		free(h_filters);
+		free(h_biases);
+		free(h_conv2_filters);
+		free(h_conv2_biases);
+		free(h_fc1_weights);
+		free(h_fc1_biases);
+		free(h_fc2_weights);
+		free(h_fc2_biases);
+		free(h_fc3_weights);
+		free(h_fc3_biases);
+		free(h_probabilities);
+
+		// Free device memory
+		cudaFree(d_input);
+		cudaFree(d_filters);
+		cudaFree(d_biases);
+		cudaFree(d_output);
+		cudaFree(d_pool1_output);
+		cudaFree(d_conv2_filters);
+		cudaFree(d_conv2_biases);
+		cudaFree(d_conv2_output);
+		cudaFree(d_pool2_output);
+		cudaFree(d_fc1_weights);
+		cudaFree(d_fc1_biases);
+		cudaFree(d_fc1_output);
+		cudaFree(d_fc1_input);
+		cudaFree(d_fc2_weights);
+		cudaFree(d_fc2_biases);
+		cudaFree(d_fc2_output);
+		cudaFree(d_fc3_weights);
+		cudaFree(d_fc3_biases);
+		cudaFree(d_fc3_output);
+		cudaFree(d_probabilities);
+
+		cudaCheckError();
+	}
+	return 0;
+}

@@ -1,0 +1,210 @@
+For Image - CUDA_FLATTENED_WEIGHTS/img_1.txt
+CONV1 Execution Time: 2.642944098 ms
+Pool1 Execution Time: 0.027648000 ms
+CONV2 Execution Time: 0.035840001 ms
+Pool2 Execution Time: 0.027648000 ms
+Flatten Execution Time: 0.017408000 ms
+FC1 Execution Time: 0.066560000 ms
+FC2 Execution Time: 0.034816001 ms
+FC3 Execution Time: 0.030719999 ms
+Softmax Execution Time: 0.030719999 ms
+Predicted Digit: 2
+Class 0: 0.0000
+Class 1: 0.0000
+Class 2: 1.0000
+Class 3: 0.0000
+Class 4: 0.0000
+Class 5: 0.0000
+Class 6: 0.0000
+Class 7: 0.0000
+Class 8: 0.0000
+Class 9: 0.0000
+For Image - CUDA_FLATTENED_WEIGHTS/img_2.txt
+CONV1 Execution Time: 0.019455999 ms
+Pool1 Execution Time: 0.014336000 ms
+CONV2 Execution Time: 0.022528000 ms
+Pool2 Execution Time: 0.015360000 ms
+Flatten Execution Time: 0.007168000 ms
+FC1 Execution Time: 0.058368001 ms
+FC2 Execution Time: 0.022528000 ms
+FC3 Execution Time: 0.018432001 ms
+Softmax Execution Time: 0.014336000 ms
+Predicted Digit: 0
+Class 0: 0.9992
+Class 1: 0.0000
+Class 2: 0.0002
+Class 3: 0.0000
+Class 4: 0.0000
+Class 5: 0.0001
+Class 6: 0.0001
+Class 7: 0.0000
+Class 8: 0.0000
+Class 9: 0.0004
+For Image - CUDA_FLATTENED_WEIGHTS/img_3.txt
+CONV1 Execution Time: 0.020479999 ms
+Pool1 Execution Time: 0.014336000 ms
+CONV2 Execution Time: 0.022528000 ms
+Pool2 Execution Time: 0.014336000 ms
+Flatten Execution Time: 0.008192000 ms
+FC1 Execution Time: 0.057344001 ms
+FC2 Execution Time: 0.022528000 ms
+FC3 Execution Time: 0.017408000 ms
+Softmax Execution Time: 0.015360000 ms
+Predicted Digit: 9
+Class 0: 0.0000
+Class 1: 0.0000
+Class 2: 0.0000
+Class 3: 0.0000
+Class 4: 0.0008
+Class 5: 0.0000
+Class 6: 0.0000
+Class 7: 0.0003
+Class 8: 0.0055
+Class 9: 0.9934
+For Image - CUDA_FLATTENED_WEIGHTS/img_4.txt
+CONV1 Execution Time: 0.019455999 ms
+Pool1 Execution Time: 0.014336000 ms
+CONV2 Execution Time: 0.022528000 ms
+Pool2 Execution Time: 0.014336000 ms
+Flatten Execution Time: 0.008192000 ms
+FC1 Execution Time: 0.057344001 ms
+FC2 Execution Time: 0.022528000 ms
+FC3 Execution Time: 0.018432001 ms
+Softmax Execution Time: 0.014336000 ms
+Predicted Digit: 9
+Class 0: 0.0131
+Class 1: 0.0000
+Class 2: 0.0027
+Class 3: 0.0044
+Class 4: 0.0005
+Class 5: 0.0008
+Class 6: 0.0000
+Class 7: 0.0431
+Class 8: 0.0056
+Class 9: 0.9297
+For Image - CUDA_FLATTENED_WEIGHTS/img_5.txt
+CONV1 Execution Time: 0.019455999 ms
+Pool1 Execution Time: 0.014336000 ms
+CONV2 Execution Time: 0.022528000 ms
+Pool2 Execution Time: 0.014336000 ms
+Flatten Execution Time: 0.008192000 ms
+FC1 Execution Time: 0.058368001 ms
+FC2 Execution Time: 0.021504000 ms
+FC3 Execution Time: 0.018432001 ms
+Softmax Execution Time: 0.015360000 ms
+Predicted Digit: 3
+Class 0: 0.0000
+Class 1: 0.0000
+Class 2: 0.0000
+Class 3: 1.0000
+Class 4: 0.0000
+Class 5: 0.0000
+Class 6: 0.0000
+Class 7: 0.0000
+Class 8: 0.0000
+Class 9: 0.0000
+For Image - CUDA_FLATTENED_WEIGHTS/img_6.txt
+CONV1 Execution Time: 0.019455999 ms
+Pool1 Execution Time: 0.014336000 ms
+CONV2 Execution Time: 0.021504000 ms
+Pool2 Execution Time: 0.015360000 ms
+Flatten Execution Time: 0.007168000 ms
+FC1 Execution Time: 0.058368001 ms
+FC2 Execution Time: 0.022528000 ms
+FC3 Execution Time: 0.017408000 ms
+Softmax Execution Time: 0.015360000 ms
+Predicted Digit: 7
+Class 0: 0.0000
+Class 1: 0.0000
+Class 2: 0.0000
+Class 3: 0.0000
+Class 4: 0.0000
+Class 5: 0.0003
+Class 6: 0.0000
+Class 7: 0.9209
+Class 8: 0.0000
+Class 9: 0.0787
+For Image - CUDA_FLATTENED_WEIGHTS/img_7.txt
+CONV1 Execution Time: 0.020479999 ms
+Pool1 Execution Time: 0.013312000 ms
+CONV2 Execution Time: 0.023552001 ms
+Pool2 Execution Time: 0.013312000 ms
+Flatten Execution Time: 0.008192000 ms
+FC1 Execution Time: 0.057344001 ms
+FC2 Execution Time: 0.022528000 ms
+FC3 Execution Time: 0.017408000 ms
+Softmax Execution Time: 0.015360000 ms
+Predicted Digit: 0
+Class 0: 1.0000
+Class 1: 0.0000
+Class 2: 0.0000
+Class 3: 0.0000
+Class 4: 0.0000
+Class 5: 0.0000
+Class 6: 0.0000
+Class 7: 0.0000
+Class 8: 0.0000
+Class 9: 0.0000
+For Image - CUDA_FLATTENED_WEIGHTS/img_8.txt
+CONV1 Execution Time: 0.019455999 ms
+Pool1 Execution Time: 0.014336000 ms
+CONV2 Execution Time: 0.022528000 ms
+Pool2 Execution Time: 0.014336000 ms
+Flatten Execution Time: 0.008192000 ms
+FC1 Execution Time: 0.057344001 ms
+FC2 Execution Time: 0.022528000 ms
+FC3 Execution Time: 0.017408000 ms
+Softmax Execution Time: 0.015360000 ms
+Predicted Digit: 3
+Class 0: 0.0000
+Class 1: 0.0000
+Class 2: 0.0000
+Class 3: 1.0000
+Class 4: 0.0000
+Class 5: 0.0000
+Class 6: 0.0000
+Class 7: 0.0000
+Class 8: 0.0000
+Class 9: 0.0000
+For Image - CUDA_FLATTENED_WEIGHTS/img_9.txt
+CONV1 Execution Time: 0.020479999 ms
+Pool1 Execution Time: 0.014336000 ms
+CONV2 Execution Time: 0.022528000 ms
+Pool2 Execution Time: 0.013312000 ms
+Flatten Execution Time: 0.009216000 ms
+FC1 Execution Time: 0.057344001 ms
+FC2 Execution Time: 0.022528000 ms
+FC3 Execution Time: 0.017408000 ms
+Softmax Execution Time: 0.015360000 ms
+Predicted Digit: 0
+Class 0: 0.9999
+Class 1: 0.0000
+Class 2: 0.0000
+Class 3: 0.0000
+Class 4: 0.0000
+Class 5: 0.0000
+Class 6: 0.0000
+Class 7: 0.0000
+Class 8: 0.0000
+Class 9: 0.0001
+For Image - CUDA_FLATTENED_WEIGHTS/img_10.txt
+CONV1 Execution Time: 0.019455999 ms
+Pool1 Execution Time: 0.014336000 ms
+CONV2 Execution Time: 0.022528000 ms
+Pool2 Execution Time: 0.014336000 ms
+Flatten Execution Time: 0.008192000 ms
+FC1 Execution Time: 0.057344001 ms
+FC2 Execution Time: 0.022528000 ms
+FC3 Execution Time: 0.018432001 ms
+Softmax Execution Time: 0.015360000 ms
+Predicted Digit: 3
+Class 0: 0.0000
+Class 1: 0.0000
+Class 2: 0.0000
+Class 3: 1.0000
+Class 4: 0.0000
+Class 5: 0.0000
+Class 6: 0.0000
+Class 7: 0.0000
+Class 8: 0.0000
+Class 9: 0.0000

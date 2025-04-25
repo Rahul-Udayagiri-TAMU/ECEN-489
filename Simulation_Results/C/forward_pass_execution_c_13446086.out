@@ -1,0 +1,230 @@
+Weights loaded successfully!
+Input image loaded and normalized successfully.
+For Image - TestDataSet/img_1.jpg
+CONV1 Execution Time (CPU): 0.333000000000000 ms
+Pool1 Execution Time (CPU): 0.028000000 ms
+CONV2 Execution Time (CPU): 0.748000000 ms
+Pool2 Execution Time (CPU): 0.009000000 ms
+Flatten Execution Time (CPU): 0.001000000 ms
+FC1 Execution Time (CPU): 0.097000000 ms
+FC2 Execution Time (CPU): 0.032000000 ms
+FC3 Execution Time (CPU): 0.003000000 ms
+Softmax Execution Time (CPU): 0.012000000 ms
+Predicted Digit: 2
+Class 0: 0.0000
+Class 1: 0.0000
+Class 2: 1.0000
+Class 3: 0.0000
+Class 4: 0.0000
+Class 5: 0.0000
+Class 6: 0.0000
+Class 7: 0.0000
+Class 8: 0.0000
+Class 9: 0.0000
+Weights loaded successfully!
+Input image loaded and normalized successfully.
+For Image - TestDataSet/img_2.jpg
+CONV1 Execution Time (CPU): 0.327000000000000 ms
+Pool1 Execution Time (CPU): 0.029000000 ms
+CONV2 Execution Time (CPU): 0.746000000 ms
+Pool2 Execution Time (CPU): 0.009000000 ms
+Flatten Execution Time (CPU): 0.002000000 ms
+FC1 Execution Time (CPU): 0.099000000 ms
+FC2 Execution Time (CPU): 0.032000000 ms
+FC3 Execution Time (CPU): 0.003000000 ms
+Softmax Execution Time (CPU): 0.001000000 ms
+Predicted Digit: 0
+Class 0: 0.9992
+Class 1: 0.0000
+Class 2: 0.0002
+Class 3: 0.0000
+Class 4: 0.0000
+Class 5: 0.0001
+Class 6: 0.0001
+Class 7: 0.0000
+Class 8: 0.0000
+Class 9: 0.0004
+Weights loaded successfully!
+Input image loaded and normalized successfully.
+For Image - TestDataSet/img_3.jpg
+CONV1 Execution Time (CPU): 0.327000000000000 ms
+Pool1 Execution Time (CPU): 0.028000000 ms
+CONV2 Execution Time (CPU): 0.747000000 ms
+Pool2 Execution Time (CPU): 0.009000000 ms
+Flatten Execution Time (CPU): 0.001000000 ms
+FC1 Execution Time (CPU): 0.099000000 ms
+FC2 Execution Time (CPU): 0.033000000 ms
+FC3 Execution Time (CPU): 0.003000000 ms
+Softmax Execution Time (CPU): 0.001000000 ms
+Predicted Digit: 9
+Class 0: 0.0000
+Class 1: 0.0000
+Class 2: 0.0000
+Class 3: 0.0000
+Class 4: 0.0008
+Class 5: 0.0000
+Class 6: 0.0000
+Class 7: 0.0003
+Class 8: 0.0055
+Class 9: 0.9934
+Weights loaded successfully!
+Input image loaded and normalized successfully.
+For Image - TestDataSet/img_4.jpg
+CONV1 Execution Time (CPU): 0.326000000000000 ms
+Pool1 Execution Time (CPU): 0.027000000 ms
+CONV2 Execution Time (CPU): 0.747000000 ms
+Pool2 Execution Time (CPU): 0.009000000 ms
+Flatten Execution Time (CPU): 0.001000000 ms
+FC1 Execution Time (CPU): 0.098000000 ms
+FC2 Execution Time (CPU): 0.032000000 ms
+FC3 Execution Time (CPU): 0.003000000 ms
+Softmax Execution Time (CPU): 0.001000000 ms
+Predicted Digit: 9
+Class 0: 0.0131
+Class 1: 0.0000
+Class 2: 0.0027
+Class 3: 0.0044
+Class 4: 0.0005
+Class 5: 0.0008
+Class 6: 0.0000
+Class 7: 0.0431
+Class 8: 0.0056
+Class 9: 0.9297
+Weights loaded successfully!
+Input image loaded and normalized successfully.
+For Image - TestDataSet/img_5.jpg
+CONV1 Execution Time (CPU): 0.326000000000000 ms
+Pool1 Execution Time (CPU): 0.028000000 ms
+CONV2 Execution Time (CPU): 0.746000000 ms
+Pool2 Execution Time (CPU): 0.009000000 ms
+Flatten Execution Time (CPU): 0.001000000 ms
+FC1 Execution Time (CPU): 0.097000000 ms
+FC2 Execution Time (CPU): 0.033000000 ms
+FC3 Execution Time (CPU): 0.003000000 ms
+Softmax Execution Time (CPU): 0.000000000 ms
+Predicted Digit: 3
+Class 0: 0.0000
+Class 1: 0.0000
+Class 2: 0.0000
+Class 3: 1.0000
+Class 4: 0.0000
+Class 5: 0.0000
+Class 6: 0.0000
+Class 7: 0.0000
+Class 8: 0.0000
+Class 9: 0.0000
+Weights loaded successfully!
+Input image loaded and normalized successfully.
+For Image - TestDataSet/img_6.jpg
+CONV1 Execution Time (CPU): 0.325000000000000 ms
+Pool1 Execution Time (CPU): 0.028000000 ms
+CONV2 Execution Time (CPU): 0.746000000 ms
+Pool2 Execution Time (CPU): 0.009000000 ms
+Flatten Execution Time (CPU): 0.001000000 ms
+FC1 Execution Time (CPU): 0.097000000 ms
+FC2 Execution Time (CPU): 0.032000000 ms
+FC3 Execution Time (CPU): 0.003000000 ms
+Softmax Execution Time (CPU): 0.001000000 ms
+Predicted Digit: 7
+Class 0: 0.0000
+Class 1: 0.0000
+Class 2: 0.0000
+Class 3: 0.0000
+Class 4: 0.0000
+Class 5: 0.0003
+Class 6: 0.0000
+Class 7: 0.9209
+Class 8: 0.0000
+Class 9: 0.0787
+Weights loaded successfully!
+Input image loaded and normalized successfully.
+For Image - TestDataSet/img_7.jpg
+CONV1 Execution Time (CPU): 0.326000000000000 ms
+Pool1 Execution Time (CPU): 0.028000000 ms
+CONV2 Execution Time (CPU): 0.750000000 ms
+Pool2 Execution Time (CPU): 0.008000000 ms
+Flatten Execution Time (CPU): 0.001000000 ms
+FC1 Execution Time (CPU): 0.099000000 ms
+FC2 Execution Time (CPU): 0.032000000 ms
+FC3 Execution Time (CPU): 0.003000000 ms
+Softmax Execution Time (CPU): 0.001000000 ms
+Predicted Digit: 0
+Class 0: 1.0000
+Class 1: 0.0000
+Class 2: 0.0000
+Class 3: 0.0000
+Class 4: 0.0000
+Class 5: 0.0000
+Class 6: 0.0000
+Class 7: 0.0000
+Class 8: 0.0000
+Class 9: 0.0000
+Weights loaded successfully!
+Input image loaded and normalized successfully.
+For Image - TestDataSet/img_8.jpg
+CONV1 Execution Time (CPU): 0.330000000000000 ms
+Pool1 Execution Time (CPU): 0.027000000 ms
+CONV2 Execution Time (CPU): 0.747000000 ms
+Pool2 Execution Time (CPU): 0.008000000 ms
+Flatten Execution Time (CPU): 0.001000000 ms
+FC1 Execution Time (CPU): 0.097000000 ms
+FC2 Execution Time (CPU): 0.032000000 ms
+FC3 Execution Time (CPU): 0.003000000 ms
+Softmax Execution Time (CPU): 0.001000000 ms
+Predicted Digit: 3
+Class 0: 0.0000
+Class 1: 0.0000
+Class 2: 0.0000
+Class 3: 1.0000
+Class 4: 0.0000
+Class 5: 0.0000
+Class 6: 0.0000
+Class 7: 0.0000
+Class 8: 0.0000
+Class 9: 0.0000
+Weights loaded successfully!
+Input image loaded and normalized successfully.
+For Image - TestDataSet/img_9.jpg
+CONV1 Execution Time (CPU): 0.325000000000000 ms
+Pool1 Execution Time (CPU): 0.030000000 ms
+CONV2 Execution Time (CPU): 0.747000000 ms
+Pool2 Execution Time (CPU): 0.009000000 ms
+Flatten Execution Time (CPU): 0.001000000 ms
+FC1 Execution Time (CPU): 0.097000000 ms
+FC2 Execution Time (CPU): 0.032000000 ms
+FC3 Execution Time (CPU): 0.003000000 ms
+Softmax Execution Time (CPU): 0.001000000 ms
+Predicted Digit: 0
+Class 0: 0.9999
+Class 1: 0.0000
+Class 2: 0.0000
+Class 3: 0.0000
+Class 4: 0.0000
+Class 5: 0.0000
+Class 6: 0.0000
+Class 7: 0.0000
+Class 8: 0.0000
+Class 9: 0.0001
+Weights loaded successfully!
+Input image loaded and normalized successfully.
+For Image - TestDataSet/img_10.jpg
+CONV1 Execution Time (CPU): 0.326000000000000 ms
+Pool1 Execution Time (CPU): 0.027000000 ms
+CONV2 Execution Time (CPU): 0.747000000 ms
+Pool2 Execution Time (CPU): 0.009000000 ms
+Flatten Execution Time (CPU): 0.001000000 ms
+FC1 Execution Time (CPU): 0.097000000 ms
+FC2 Execution Time (CPU): 0.032000000 ms
+FC3 Execution Time (CPU): 0.003000000 ms
+Softmax Execution Time (CPU): 0.001000000 ms
+Predicted Digit: 3
+Class 0: 0.0000
+Class 1: 0.0000
+Class 2: 0.0000
+Class 3: 1.0000
+Class 4: 0.0000
+Class 5: 0.0000
+Class 6: 0.0000
+Class 7: 0.0000
+Class 8: 0.0000
+Class 9: 0.0000
