@@ -149,98 +149,122 @@ __global__ void pool2_shared_kernel(
 	output[fmap * 16 + out_row * 4 + out_col] = max_val;
 }
 
+#define TILE_WIDTH_CONV2 4
+#define FILTER_SIZE_CONV2 5
+#define INPUT_CHANNELS 6
 
 __global__ void conv2_shared_kernel(
-		const float* input,       // [6 x 12 x 12]
-		const float* filters,     // [16 x 6 x 5 x 5]
-		const float* biases,      // [16]
-		float* output             // [16 x 8 x 8]
-		) {
-	const int out_ch = blockIdx.z;
-	const int out_row = blockIdx.y * blockDim.y + threadIdx.y;
-	const int out_col = blockIdx.x * blockDim.x + threadIdx.x;
+    const float* input,     // [6 x 12 x 12]
+    const float* filters,   // [16 x 6 x 5 x 5]
+    const float* biases,    // [16]
+    float* output           // [16 x 8 x 8]
+) {
+    __shared__ float tile[INPUT_CHANNELS][TILE_WIDTH_CONV2 + 4][TILE_WIDTH_CONV2 + 4];
 
-	if (out_row >= 8 || out_col >= 8) return;
+    int tx = threadIdx.x;
+    int ty = threadIdx.y;
+    int row_o = blockIdx.y * TILE_WIDTH_CONV2 + ty;
+    int col_o = blockIdx.x * TILE_WIDTH_CONV2 + tx;
+    int filter_id = blockIdx.z;
 
-	// Shared memory tile padded to prevent bank conflicts
-	__shared__ float tile[6][12][13];  // [in_ch][row][col] → padding last dim
+    // Load input tile including halo
+    // Several Data elements are loaded via striding
+    for (int c = 0; c < INPUT_CHANNELS; c++) {
+        for (int i = ty; i < TILE_WIDTH_CONV2 + 4; i += blockDim.y) {
+            for (int j = tx; j < TILE_WIDTH_CONV2 + 4; j += blockDim.x) {
+                int input_row = blockIdx.y * TILE_WIDTH_CONV2 + i;
+                int input_col = blockIdx.x * TILE_WIDTH_CONV2 + j;
+                float val = 0.0f;
+                if (input_row < 12 && input_col < 12) {
+                    int idx = c * 144 + input_row * 12 + input_col;
+                    val = input[idx];
+                }
+                tile[c][i][j] = val;
+            }
+        }
+    }
 
-	int in_row_start = blockIdx.y * blockDim.y;
-	int in_col_start = blockIdx.x * blockDim.x;
+    __syncthreads();
 
-	for (int c = 0; c < 6; ++c) {
-		for (int i = threadIdx.y; i < 12; i += blockDim.y) {
-			for (int j = threadIdx.x; j < 12; j += blockDim.x) {
-				int global_row = in_row_start + i;
-				int global_col = in_col_start + j;
-				tile[c][i][j] = (global_row < 12 && global_col < 12)
-					? input[c * 144 + global_row * 12 + global_col]
-					: 0.0f;
-			}
-		}
-	}
-
-	__syncthreads();
-
-	float sum = 0.0f;
-
-	for (int c = 0; c < 6; ++c) {
-		for (int i = 0; i < 5; ++i) {
-			for (int j = 0; j < 5; ++j) {
-				float val = tile[c][threadIdx.y + i][threadIdx.x + j];
-				int filter_idx = out_ch * (6 * 25) + c * 25 + i * 5 + j;
-				sum += val * filters[filter_idx];
-			}
-		}
-	}
-
-	int out_idx = out_ch * 64 + out_row * 8 + out_col;
-	output[out_idx] = fmaxf(0.0f, sum + biases[out_ch]); // ReLU
+    if (row_o < 8 && col_o < 8) {
+        float sum = 0.0f;
+        for (int c = 0; c < INPUT_CHANNELS; ++c) {
+            for (int i = 0; i < FILTER_SIZE_CONV2; ++i) {
+                for (int j = 0; j < FILTER_SIZE_CONV2; ++j) {
+                    sum += tile[c][ty + i][tx + j] *
+                           filters[filter_id * INPUT_CHANNELS * 25 + c * 25 + i * 5 + j];
+                }
+            }
+        }
+        int out_idx = filter_id * 64 + row_o * 8 + col_o;
+        output[out_idx] = fmaxf(0.0f, sum + biases[filter_id]);
+    }
 }
 
-
-
+#define TILE_WIDTH 16
+#define FILTER_SIZE 5
+#define INPUT_SIZE 28
+#define OUTPUT_SIZE 24
+#define PAD (FILTER_SIZE - 1)
 
 __global__ void conv1_shared_kernel(
-		const float* input,       // [28 x 28]
-		const float* filters,     // [6 x 5 x 5]
-		const float* biases,      // [6]
-		float* output             // [6 x 24 x 24]
-		) {
-	const int out_ch = blockIdx.z;
-	const int out_row = blockIdx.y * blockDim.y + threadIdx.y;
-	const int out_col = blockIdx.x * blockDim.x + threadIdx.x;
+    const float* input,     // [28 * 28]
+    const float* filters,   // [6 * 5 * 5]
+    const float* biases,    // [6]
+    float* output           // [6 * 24 * 24]
+) {
+    int out_ch = blockIdx.z;
+    int tx = threadIdx.x;
+    int ty = threadIdx.y;
+    int row_o = blockIdx.y * blockDim.y + ty;
+    int col_o = blockIdx.x * blockDim.x + tx;
 
-	if (out_row >= 24 || out_col >= 24) return;
+    __shared__ float tile[TILE_WIDTH + FILTER_SIZE - 1][TILE_WIDTH + FILTER_SIZE - 1];
 
-	// Shared memory tile (padded to avoid bank conflict)
-	__shared__ float tile[28][29];  // 28x28 input padded to 28x29
+    int row_i = row_o;
+    int col_i = col_o;
 
-	// Cooperative load of input
-	for (int i = threadIdx.y; i < 28; i += blockDim.y) {
-		for (int j = threadIdx.x; j < 28; j += blockDim.x) {
-			tile[i][j] = input[i * 28 + j];
-		}
-	}
+    if (row_i < INPUT_SIZE && col_i < INPUT_SIZE) {
+        tile[ty][tx] = input[row_i * INPUT_SIZE + col_i];
+    } else {
+        tile[ty][tx] = 0.0f;
+    }
 
-	__syncthreads();
+    // Load halo (right & bottom edges)
+    // Note: CUDA organizes threads and locks in row major layout
+    // As the tx value increases we move from left to right and as ty value increases we move from top to bottom.
+    // The same is applicable for blocks and below code overrides the values in locations at tile
+    // It is a benign override, just wrote this way for code simplicity
+    // Load Right Hallow values
+    if (tx < FILTER_SIZE - 1 && (col_i + FILTER_SIZE - 1) < INPUT_SIZE) {
+        tile[ty][tx + TILE_WIDTH] = input[row_i * INPUT_SIZE + col_i + TILE_WIDTH];
+    }
+    // Load Bottom Halo values
+    if (ty < FILTER_SIZE - 1 && (row_i + FILTER_SIZE - 1) < INPUT_SIZE) {
+        tile[ty + TILE_WIDTH][tx] = input[(row_i + TILE_WIDTH) * INPUT_SIZE + col_i];
+    }
+    // Load Bottom-Right corner Halo values
+    if (tx < FILTER_SIZE - 1 && ty < FILTER_SIZE - 1 &&
+        (row_i + TILE_WIDTH) < INPUT_SIZE && (col_i + TILE_WIDTH) < INPUT_SIZE) {
+        tile[ty + TILE_WIDTH][tx + TILE_WIDTH] = input[(row_i + TILE_WIDTH) * INPUT_SIZE + col_i + TILE_WIDTH];
+    }
 
-	float sum = 0.0f;
-	for (int i = 0; i < 5; ++i) {
-		for (int j = 0; j < 5; ++j) {
-			int in_row = out_row + i;
-			int in_col = out_col + j;
-			float val = tile[in_row][in_col];
-			float weight = filters[out_ch * 25 + i * 5 + j];
-			sum += val * weight;
-		}
-	}
+    __syncthreads();
 
-	int out_idx = out_ch * 576 + out_row * 24 + out_col;
-	output[out_idx] = fmaxf(0.0f, sum + biases[out_ch]); // ReLU
+    // Apply filter only for valid output region
+    if (row_o < OUTPUT_SIZE && col_o < OUTPUT_SIZE) {
+        float sum = 0.0f;
+        for (int i = 0; i < FILTER_SIZE; ++i) {
+            for (int j = 0; j < FILTER_SIZE; ++j) {
+                sum += tile[ty + i][tx + j] *
+                       filters[out_ch * FILTER_SIZE * FILTER_SIZE + i * FILTER_SIZE + j];
+            }
+        }
+
+        int out_idx = out_ch * OUTPUT_SIZE * OUTPUT_SIZE + row_o * OUTPUT_SIZE + col_o;
+        output[out_idx] = fmaxf(0.0f, sum + biases[out_ch]);
+    }
 }
-
-
 
 __global__ void pool1_shared_kernel(
 		const float* input,    // [6 × 24 × 24]
@@ -591,53 +615,109 @@ int main() {
 		cudaMalloc(&d_probabilities, 10 * sizeof(float));
 
 
-		cudaEvent_t start, stop;
+
+
+
+		cudaEvent_t start, start1, start2, start3, start4, start5, start6, start7, start8, stop;
 		cudaEventCreate(&start);
+		cudaEventCreate(&start1);
+		cudaEventCreate(&start2);
+		cudaEventCreate(&start3);
+		cudaEventCreate(&start4);
+		cudaEventCreate(&start5);
+		cudaEventCreate(&start6);
+		cudaEventCreate(&start7);
+		cudaEventCreate(&start8);
 		cudaEventCreate(&stop);
-		cudaEventRecord(start);
+
+
+
 		// Inference Kernels Start
-		dim3 blockDim(12, 12);
-		dim3 gridDim((OUTPUT_SIZE + 11) / 12, (OUTPUT_SIZE + 11) / 12, NUM_FILTERS);
+//		dim3 blockDim(12, 12);
+//		dim3 gridDim((OUTPUT_SIZE + 11) / 12, (OUTPUT_SIZE + 11) / 12, NUM_FILTERS);
+
+
+
+		dim3 blockDim(16, 16);
+		dim3 gridDim((OUTPUT_SIZE + 15) / 16, (OUTPUT_SIZE + 15) / 16, 6);
+
+		cudaEventRecord(start);
 		conv1_shared_kernel<<<gridDim, blockDim>>>(d_input, d_filters, d_biases, d_output);
 		cudaDeviceSynchronize();
 		
+		cudaEventRecord(start1);
 		dim3 blockDimPool1(12, 12);
 		dim3 gridDimPool1((12 + 11) / 12, (12 + 11) / 12, 6);
 		pool1_shared_kernel<<<gridDimPool1, blockDimPool1>>>(d_output, d_pool1_output);
 		cudaDeviceSynchronize();
 		
-		dim3 blockDimConv2(8, 8);
-		dim3 gridDimConv2((8 + 7) / 8, (8 + 7) / 8, 16);
+		cudaEventRecord(start2);
+		dim3 blockDimConv2(4, 4);
+		dim3 gridDimConv2((8 + 8) / 8, (8 + 8) / 8, 16);
 		conv2_shared_kernel<<<gridDimConv2, blockDimConv2>>>(d_pool1_output, d_conv2_filters, d_conv2_biases, d_conv2_output);
 		cudaDeviceSynchronize();
 		
+		cudaEventRecord(start3);
 		dim3 blockDimPool2(4, 4);
 		dim3 gridDimPool2((4 + 3) / 4, (4 + 3) / 4, 16);
 		pool2_shared_kernel<<<gridDimPool2, blockDimPool2>>>(d_conv2_output, d_pool2_output);
 		cudaDeviceSynchronize();
 
+		cudaEventRecord(start4);
 		flatten_pool2<<<1, 256>>>(d_pool2_output, d_fc1_input);
 		cudaDeviceSynchronize();
 		
+		cudaEventRecord(start5);
 		fc1_kernel<<<1, 120>>>(d_fc1_input, d_fc1_weights, d_fc1_biases, d_fc1_output);
 		cudaDeviceSynchronize();
 
+		cudaEventRecord(start6);
 		fc2_kernel<<<1, 84>>>(d_fc1_output, d_fc2_weights, d_fc2_biases, d_fc2_output);
 		cudaDeviceSynchronize();
 
+		cudaEventRecord(start7);
 		fc3_kernel<<<1, 10>>>(d_fc2_output, d_fc3_weights, d_fc3_biases, d_fc3_output);
 		cudaDeviceSynchronize();
 
+		cudaEventRecord(start8);
 		softmax_kernel<<<1, 10>>>(d_fc3_output, d_probabilities, 10);
 		cudaDeviceSynchronize();
 		
 		cudaEventRecord(stop);
 		cudaEventSynchronize(stop);
 		
+		
 		float milliseconds = 0;
-		cudaEventElapsedTime(&milliseconds, start, stop);
 
-		printf("Iteration - %d, Time taken for Forward Pass execution : %9f\n", iter, milliseconds);
+		printf("For Image - %s\n", input_image_file_path_string); 
+		cudaEventElapsedTime(&milliseconds, start, start1);
+		printf("CONV1 Execution Time: %.9f ms\n", milliseconds);
+
+		cudaEventElapsedTime(&milliseconds, start1, start2);
+		printf("Pool1 Execution Time: %.9f ms\n", milliseconds);
+
+		cudaEventElapsedTime(&milliseconds, start2, start3);
+		printf("CONV2 Execution Time: %.9f ms\n", milliseconds);
+
+		cudaEventElapsedTime(&milliseconds, start3, start4);
+		printf("Pool2 Execution Time: %.9f ms\n", milliseconds);
+
+		cudaEventElapsedTime(&milliseconds, start4, start5);
+		printf("Flatten Execution Time: %.9f ms\n", milliseconds);
+
+		cudaEventElapsedTime(&milliseconds, start5, start6);
+		printf("FC1 Execution Time: %.9f ms\n", milliseconds);
+
+		cudaEventElapsedTime(&milliseconds, start6, start7);
+		printf("FC2 Execution Time: %.9f ms\n", milliseconds);
+
+		cudaEventElapsedTime(&milliseconds, start7, start8);
+		printf("FC3 Execution Time: %.9f ms\n", milliseconds);
+
+		cudaEventElapsedTime(&milliseconds, start8, stop);
+		printf("Softmax Execution Time: %.9f ms\n", milliseconds);
+
+//		printf("Iteration - %d, Time taken for Forward Pass execution : %9f\n", iter, milliseconds);
 
 		// Fetch result
 		cudaMemcpy(h_probabilities, d_probabilities, 10 * sizeof(float), cudaMemcpyDeviceToHost);
