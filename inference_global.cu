@@ -535,8 +535,16 @@ int main() {
 
 // Kernel Launching for each layer in the Forward Pass
 
-		cudaEvent_t start, stop;
+		cudaEvent_t start, start1, start2, start3, start4, start5, start6, start7, start8, stop;
 		cudaEventCreate(&start);
+		cudaEventCreate(&start1);
+		cudaEventCreate(&start2);
+		cudaEventCreate(&start3);
+		cudaEventCreate(&start4);
+		cudaEventCreate(&start5);
+		cudaEventCreate(&start6);
+		cudaEventCreate(&start7);
+		cudaEventCreate(&start8);
 		cudaEventCreate(&stop);
 
 		cudaEventRecord(start);
@@ -545,39 +553,47 @@ int main() {
 		conv1_kernel<<<gridDim, blockDim>>>(d_input, d_filters, d_biases, d_output);
 		cudaDeviceSynchronize();
 
+		cudaEventRecord(start1);
 		dim3 blockDimPool1(16, 16);
 		dim3 gridDimPool1((12 + 15) / 16, (12 + 15) / 16, 6);
 		pool1_kernel<<<gridDimPool1, blockDimPool1>>>(d_output, d_pool1_output);
 		cudaDeviceSynchronize();
 
+		cudaEventRecord(start2);
 		dim3 blockDimConv2(8, 8);
 		dim3 gridDimConv2((8 + 7) / 8, (8 + 7) / 8, 16);
 		conv2_kernel<<<gridDimConv2, blockDimConv2>>>(d_pool1_output, d_conv2_filters, d_conv2_biases, d_conv2_output);
 		cudaDeviceSynchronize();
 
+		cudaEventRecord(start3);
 		dim3 blockDimPool2(4, 4);
 		dim3 gridDimPool2((4 + 3) / 4, (4 + 3) / 4, 16);
 		pool2_kernel<<<gridDimPool2, blockDimPool2>>>(d_conv2_output, d_pool2_output);
 		cudaDeviceSynchronize();
 
+		cudaEventRecord(start4);
 		dim3 blockDimFlatten(256);
 		flatten_pool2<<<1, blockDimFlatten>>>(d_pool2_output, d_fc1_input);
 		
+		cudaEventRecord(start5);
 		dim3 blockDimFC1(120);
 		dim3 gridDimFC1(1);
 		fc1_kernel<<<gridDimFC1, blockDimFC1>>>(d_fc1_input, d_fc1_weights, d_fc1_biases, d_fc1_output);
 		cudaDeviceSynchronize();
 
+		cudaEventRecord(start6);
 		dim3 blockDimFC2(84);
 		dim3 gridDimFC2(1);
 		fc2_kernel<<<gridDimFC2, blockDimFC2>>>(d_fc1_output, d_fc2_weights, d_fc2_biases, d_fc2_output);
 		cudaDeviceSynchronize();
 
+		cudaEventRecord(start7);
 		dim3 blockDimFC3(10);
 		dim3 gridDimFC3(1);
 		fc3_kernel<<<gridDimFC3, blockDimFC3>>>(d_fc2_output, d_fc3_weights, d_fc3_biases, d_fc3_output);
 		cudaDeviceSynchronize();
 
+		cudaEventRecord(start8);
 		dim3 blockDimSoftmax(10);
 		dim3 gridDimSoftmax(1);
 		softmax_kernel<<<gridDimSoftmax, blockDimSoftmax>>>(d_fc3_output, d_probabilities, 10);
@@ -587,10 +603,36 @@ int main() {
 		cudaEventSynchronize(stop);
 		
 		float milliseconds = 0;
-		cudaEventElapsedTime(&milliseconds, start, stop);
 
-		printf("Iteration - %d, Time taken for Forward Pass execution : %9f\n", iter, milliseconds);
+		printf("For Image - %s\n", input_image_file_path_string); 
+		cudaEventElapsedTime(&milliseconds, start, start1);
+		printf("CONV1 Execution Time: %.9f ms\n", milliseconds);
 
+		cudaEventElapsedTime(&milliseconds, start1, start2);
+		printf("Pool1 Execution Time: %.9f ms\n", milliseconds);
+
+		cudaEventElapsedTime(&milliseconds, start2, start3);
+		printf("CONV2 Execution Time: %.9f ms\n", milliseconds);
+
+		cudaEventElapsedTime(&milliseconds, start3, start4);
+		printf("Pool2 Execution Time: %.9f ms\n", milliseconds);
+
+		cudaEventElapsedTime(&milliseconds, start4, start5);
+		printf("Flatten Execution Time: %.9f ms\n", milliseconds);
+
+		cudaEventElapsedTime(&milliseconds, start5, start6);
+		printf("FC1 Execution Time: %.9f ms\n", milliseconds);
+
+		cudaEventElapsedTime(&milliseconds, start6, start7);
+		printf("FC2 Execution Time: %.9f ms\n", milliseconds);
+
+		cudaEventElapsedTime(&milliseconds, start7, start8);
+		printf("FC3 Execution Time: %.9f ms\n", milliseconds);
+
+		cudaEventElapsedTime(&milliseconds, start8, stop);
+		printf("Softmax Execution Time: %.9f ms\n", milliseconds);
+
+//		printf("Iteration - %d, Time taken for Forward Pass execution : %9f\n", iter, milliseconds);
 		//Uncomment the below lines of code to extract the output of each kernel into text files, to use it in
 		//Python code to verify the code implementation correctness
 		/*
